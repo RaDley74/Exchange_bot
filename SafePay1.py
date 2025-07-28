@@ -5,7 +5,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ConversationHandler,
     MessageHandler,
-    Filters,
+    filters,
     CallbackContext,
 )
 
@@ -21,6 +21,7 @@ EXCHANGE_RATE = 41.2  # float с точкой
     ENTERING_TRX_AMOUNT,
     ENTERING_TRX_ADDRESS,
 ) = range(5)
+
 
 def start(update: Update, context: CallbackContext):
     keyboard = [
@@ -64,14 +65,16 @@ def handle_menu(update: Update, context: CallbackContext):
             [InlineKeyboardButton("USDT", callback_data='currency_usdt')],
             [InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]
         ]
-        query.edit_message_text("Выберите валюту для обмена:", reply_markup=InlineKeyboardMarkup(keyboard))
+        query.edit_message_text("Выберите валюту для обмена:",
+                                reply_markup=InlineKeyboardMarkup(keyboard))
         return CHOOSING_CURRENCY
 
     elif data == 'status':
         query.edit_message_text("Введите номер вашей заявки (в разработке)")
 
     elif data == 'referral':
-        query.edit_message_text("🌟 Приглашай друзей и получай бонусы! Твоя ссылка: https://t.me/ТвойБот?start=ref")
+        query.edit_message_text(
+            "🌟 Приглашай друзей и получай бонусы! Твоя ссылка: https://t.me/ТвойБот?start=ref")
 
     elif data == 'help':
         query.edit_message_text("🔧 Помощь: Напиши @admin по любым вопросам")
@@ -187,11 +190,11 @@ def main():
         entry_points=[CallbackQueryHandler(handle_menu)],
         states={
             CHOOSING_CURRENCY: [CallbackQueryHandler(choosing_currency)],
-            ENTERING_AMOUNT: [MessageHandler(Filters.text & ~Filters.command, entering_amount)],
+            ENTERING_AMOUNT: [MessageHandler(filters.text & ~filters.command, entering_amount)],
             CONFIRMING_EXCHANGE: [CallbackQueryHandler(confirming_exchange)],
 
-            ENTERING_TRX_AMOUNT: [MessageHandler(Filters.text & ~Filters.command, entering_trx_amount)],
-            ENTERING_TRX_ADDRESS: [MessageHandler(Filters.text & ~Filters.command, entering_trx_address)],
+            ENTERING_TRX_AMOUNT: [MessageHandler(filters.text & ~filters.command, entering_trx_amount)],
+            ENTERING_TRX_ADDRESS: [MessageHandler(filters.text & ~filters.command, entering_trx_address)],
         },
         fallbacks=[CommandHandler('start', start)],
         # per_message не указываем — оставляем по умолчанию False
