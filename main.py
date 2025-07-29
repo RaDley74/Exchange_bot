@@ -1,4 +1,4 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot, MenuButtonCommands
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -48,14 +48,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("➸ Обменять", callback_data='exchange'),
-            InlineKeyboardButton("💰 Получить TRX", callback_data='get_trx'),
+            # InlineKeyboardButton("💰 Получить TRX", callback_data='get_trx'),
             InlineKeyboardButton("📉 Курс", callback_data='rate'),
         ],
-        [
-            InlineKeyboardButton("📦 Статус заявки", callback_data='status'),
-            InlineKeyboardButton("🏰 Рефералка", callback_data='referral'),
-            InlineKeyboardButton("🛠 Помощь", callback_data='help'),
-        ]
+        # [
+        #     InlineKeyboardButton("📦 Статус заявки", callback_data='status'),
+        #     InlineKeyboardButton("🏰 Рефералка", callback_data='referral'),
+        #     InlineKeyboardButton("🛠 Помощь", callback_data='help'),
+        # ]
     ]
     text = (
         "👋 Привет! Добро пожаловать в Crypto-Exchange Bot 💱\n\n"
@@ -75,11 +75,14 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == 'rate':
-        await query.edit_message_text(f"📉 Актуальный курс: 1 USDT = {EXCHANGE_RATE} UAH")
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]
+        ]
+        await query.edit_message_text(f"📉 Актуальный курс: 1 USDT = {EXCHANGE_RATE} UAH", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    elif data == 'get_trx':
-        await query.edit_message_text("💰 Пожалуйста, введите сумму TRX для получения:")
-        return ENTERING_TRX_AMOUNT
+    # elif data == 'get_trx':
+    #     await query.edit_message_text("💰 Пожалуйста, введите сумму TRX для получения:")
+    #     return ENTERING_TRX_AMOUNT
 
     elif data == 'exchange':
         keyboard = [
@@ -90,15 +93,15 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                       reply_markup=InlineKeyboardMarkup(keyboard))
         return CHOOSING_CURRENCY
 
-    elif data == 'status':
-        await query.edit_message_text("Введите номер вашей заявки (в разработке)")
+    # elif data == 'status':
+    #     await query.edit_message_text("Введите номер вашей заявки (в разработке)")
 
-    elif data == 'referral':
-        await query.edit_message_text(
-            "🌟 Приглашай друзей и получай бонусы! Твоя ссылка: https://t.me/ТвойБот?start=ref")
+    # elif data == 'referral':
+    #     await query.edit_message_text(
+    #         "🌟 Приглашай друзей и получай бонусы! Твоя ссылка: https://t.me/ТвойБот?start=ref")
 
-    elif data == 'help':
-        await query.edit_message_text("🔧 Помощь: Напиши @admin по любым вопросам")
+    # elif data == 'help':
+    #     await query.edit_message_text("🔧 Помощь: Напиши @admin по любым вопросам")
 
     elif data == 'back_to_menu':
         await start(update, context)
@@ -156,12 +159,42 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     data = query.data
 
+    user = update.effective_user
+    user_info = f"👤 Пользователь:\n" \
+        f"ID: {user.id}\n" \
+        f"Имя: {user.first_name or '-'}\n" \
+        f"Юзернейм: @{user.username if user.username else 'нет'}"
+
     if data == 'send_exchange':
-        await query.edit_message_text(
-            "Спасибо за заявку!\n\n"
-            "Переведите средства на адрес:\n`TMHDhHp3qdT4EuEuFQGWxuZ14EvzDZseac`",
+
+        amount = context.user_data.get('amount')
+        currency = context.user_data.get('currency', 'USDT')
+        sum_uah = amount * EXCHANGE_RATE if amount else 0
+
+        await query.message.chat.send_message(
+            f"Спасибо за заявку!\n\n"
+            f"Сумма: {amount} {currency} = {sum_uah:.2f} UAH\n"
+            f"Переведите средства на адрес:\n"
+            f"`TMHDhHp3qdT4EuEuFQGWxuZ14EvzDZseac`",
             parse_mode='Markdown'
         )
+
+        admin_chat_id = config['User']['ADMIN_CHAT_ID']
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Деньги получены", callback_data=f"confirm_payment_{user.id}")]
+        ])
+
+        await context.bot.send_message(
+            chat_id=admin_chat_id,
+            text=(
+                f"📥 Новая заявка на обмен\n\n"
+                f"💱 {amount} {currency} = {sum_uah:.2f} UAH\n\n"
+                f"{user_info}"
+            ), reply_markup=keyboard
+        )
+
+        await start(update, context)
         return ConversationHandler.END
 
     elif data == 'back_to_menu':
@@ -202,10 +235,35 @@ async def entering_trx_address(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 
+async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    # Извлекаем user_id из callback_data
+    data = query.data  # confirm_payment_12345678
+    user_id = int(data.split('_')[-1])
+
+    # Отправляем пользователю уведомление
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="✅ Средства получены. Ожидайте перевода. Спасибо за использование нашего сервиса!"
+        )
+        original_text = query.message.text
+        updated_text = original_text + "\n\n✅ Пользователю отправлено подтверждение получения средств."
+        await query.edit_message_text(updated_text)
+    except Exception as e:
+        await query.edit_message_text(
+            query.message.text + f"\n\n❌ Ошибка при отправке пользователю: {e}"
+        )
+
+
 def main():
     print("Starting the bot...")
 
     application = ApplicationBuilder().token(config['User']['TOKEN']).build()
+    bot = Bot(token=config['User']['TOKEN'])
+    bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(handle_menu)],
@@ -219,7 +277,8 @@ def main():
         },
         fallbacks=[CommandHandler('start', start)],
     )
-
+    application.add_handler(CallbackQueryHandler(
+        handle_payment_confirmation, pattern=r'^confirm_payment_'))
     application.add_handler(CommandHandler('start', start))
     application.add_handler(conv_handler)
 
