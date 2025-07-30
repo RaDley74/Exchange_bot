@@ -14,10 +14,14 @@ import os
 (
     CHOOSING_CURRENCY,
     ENTERING_AMOUNT,
+    ENTERING_BANK_NAME,
+    ENTERING_CARD_DETAILS,
+    ENTERING_FIO_DETAILS,
+    ENTERING_INN_DETAILS,
     CONFIRMING_EXCHANGE,
     ENTERING_TRX_AMOUNT,
     ENTERING_TRX_ADDRESS,
-) = range(5)
+) = range(9)
 
 config_file_name = 'settings.ini'
 config = configparser.ConfigParser()
@@ -117,7 +121,7 @@ async def choosing_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == 'currency_usdt':
         context.user_data['currency'] = 'USDT'
-        await query.edit_message_text("Введите сумму для обмена (в USDT):")
+        await query.message.chat.send_message(f"Введите сумму для обмена (в {context.user_data['currency']}):")
         return ENTERING_AMOUNT
 
     elif data == 'back_to_menu':
@@ -141,16 +145,109 @@ async def entering_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['amount'] = amount
     currency = context.user_data.get('currency', 'USDT')
     sum_uah = amount * EXCHANGE_RATE
+    context.user_data['sum_uah'] = sum_uah
+    # keyboard = [
+    #     [InlineKeyboardButton("Отправить", callback_data='send_exchange')],
+    #     [InlineKeyboardButton("Отмена", callback_data='back_to_menu')]
+    # ]
+
+    # await update.message.reply_text(
+    #     f"Вы хотите обменять {amount} {currency} по курсу {EXCHANGE_RATE}.\n"
+    #     f"Итого к оплате: {sum_uah:.2f} UAH.\n\nНажмите 'Отправить' для подтверждения.",
+    #     reply_markup=InlineKeyboardMarkup(keyboard)
+    # )
+    # return CONFIRMING_EXCHANGE
+    await update.message.reply_text(
+        f"Хорошо! К оплате: {sum_uah:.2f} UAH.\n\nПожалуйста, укажите название банка, с которого будет производиться обмен (например, 'ПриватБанк', 'Монобанк' и т.д.).\n"
+    )
+    return ENTERING_BANK_NAME  # ← переходим в следующее состояние
+
+
+async def entering_bank_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bank_name = update.message.text.strip()
+    if not bank_name:
+        await update.message.reply_text("Пожалуйста, введите корректное название банка.")
+        return ENTERING_BANK_NAME
+
+    context.user_data['bank_name'] = bank_name
+
+    await update.message.reply_text(
+        f"Вы указали банк: {bank_name}\n\n"
+    )
+    await update.message.reply_text(
+        "Введите реквизиты вашей банковской карты (номер карты или IBAN):"
+    )
+
+    return ENTERING_CARD_DETAILS
+
+
+async def entering_card_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    card_info = update.message.text.strip()
+    if not card_info:
+        await update.message.reply_text("Пожалуйста, введите корректные реквизиты.")
+        return ENTERING_CARD_DETAILS
+
+    context.user_data['card_info'] = card_info
+
+    await update.message.reply_text(
+        f"Вы указали реквизиты: {card_info}\n\n")
+    await update.message.reply_text(
+        f"Укажите ФИО для зачисления средств.\n"
+    )
+
+    return ENTERING_FIO_DETAILS
+
+
+async def entering_fio_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    fio = update.message.text.strip()
+    if not fio:
+        await update.message.reply_text("Пожалуйста, введите корректные ФИО.")
+        return ENTERING_FIO_DETAILS
+
+    context.user_data['fio'] = fio
+
+    await update.message.reply_text(
+        f"Вы указали ФИО: {fio}"
+    )
+    await update.message.reply_text(
+        "Введите ИНН (Идентификационный номер налогоплательщика):"
+    )
+
+    return ENTERING_INN_DETAILS
+
+
+async def entering_inn_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    inn = update.message.text.strip()
+    if not inn:
+        await update.message.reply_text("Пожалуйста, введите корректный ИНН.")
+        return ENTERING_INN_DETAILS
+
+    context.user_data['inn'] = inn
+
+    await update.message.reply_text(
+        f"Вы указали ИНН: {inn}\n\n"
+    )
+
+    amount = context.user_data['amount']
+    currency = context.user_data['currency']
+    sum_uah = context.user_data['sum_uah']
+    fio = context.user_data['fio']
+    bank_name = context.user_data['bank_name']
     keyboard = [
         [InlineKeyboardButton("Отправить", callback_data='send_exchange')],
         [InlineKeyboardButton("Отмена", callback_data='back_to_menu')]
     ]
 
     await update.message.reply_text(
-        f"Вы хотите обменять {amount} {currency} по курсу {EXCHANGE_RATE}.\n"
-        f"Итого к оплате: {sum_uah:.2f} UAH.\n\nНажмите 'Отправить' для подтверждения.",
+        f"Вы хотите обменять {amount} {currency} на {sum_uah:.2f} UAH.\n\n"
+        f"Банк: {bank_name}\n"
+        f"ФИО: {fio}\n"
+        f"Реквизиты карты: {context.user_data['card_info']}\n"
+        f"ИНН: {inn}\n\n"
+        "Нажмите 'Отправить' для подтверждения.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
     return CONFIRMING_EXCHANGE
 
 
@@ -159,11 +256,23 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     data = query.data
 
+    amount = context.user_data['amount']
+    currency = context.user_data['currency']
+    sum_uah = context.user_data['sum_uah']
+    fio = context.user_data['fio']
+    bank_name = context.user_data['bank_name']
+    inn = context.user_data['inn']
+
     user = update.effective_user
-    user_info = f"👤 Пользователь:\n" \
-        f"ID: {user.id}\n" \
-        f"Имя: {user.first_name or '-'}\n" \
-        f"Юзернейм: @{user.username if user.username else 'нет'}"
+    user_info = (f"👤 Пользователь:\n"
+    f"ID: {user.id}\n"
+    f"Имя: {user.first_name or '-'}\n"
+    f"Юзернейм: @{user.username if user.username else 'нет'}\n\n")
+
+    transfer_info = (f"Банк: {bank_name}\n"
+    f"ФИО: {fio}\n"
+    f"Реквизиты карты: {context.user_data['card_info']}\n"
+    f"ИНН: {inn}\n")
 
     if data == 'send_exchange':
 
@@ -191,6 +300,7 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
                 f"📥 Новая заявка на обмен\n\n"
                 f"💱 {amount} {currency} = {sum_uah:.2f} UAH\n\n"
                 f"{user_info}"
+                f"{transfer_info}"
             ), reply_markup=keyboard
         )
 
@@ -270,8 +380,11 @@ def main():
         states={
             CHOOSING_CURRENCY: [CallbackQueryHandler(choosing_currency)],
             ENTERING_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, entering_amount)],
+            ENTERING_BANK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, entering_bank_name)],
+            ENTERING_CARD_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, entering_card_details)],
+            ENTERING_FIO_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, entering_fio_details)],
+            ENTERING_INN_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, entering_inn_details)],
             CONFIRMING_EXCHANGE: [CallbackQueryHandler(confirming_exchange)],
-
             ENTERING_TRX_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, entering_trx_amount)],
             ENTERING_TRX_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, entering_trx_address)],
         },
