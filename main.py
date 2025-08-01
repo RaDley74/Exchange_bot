@@ -10,6 +10,13 @@ from telegram.ext import (
 )
 import configparser
 import os
+import admin_panel
+import warnings
+
+
+warnings.filterwarnings("ignore", category=UserWarning)
+
+ASK_PASSWORD, ADMIN_MENU = range(2)
 
 (
     CHOOSING_CURRENCY,
@@ -35,6 +42,9 @@ if not os.path.exists(config_file_name):
     }
     config['Settings'] = {
         'EXCHANGE_RATE': '41.2',
+        'ADMIN_PASSWORD': 'your_admin_id_here',
+        'WALLET_ADDRESS': 'your_wallet_address_here',
+        'SUPPORT_CONTACT': 'your_support_contact_here'
     }
 
     with open(config_file_name, 'w') as config_file:
@@ -42,15 +52,17 @@ if not os.path.exists(config_file_name):
 
     print(
         f"Configuration file '{config_file_name}' created. Please edit it with your token and admin chat ID, then restart the script.")
+    input("Press Enter to exit...")
     exit(0)
 
 else:
     config.read(config_file_name)
 
-EXCHANGE_RATE = float(config['Settings']['EXCHANGE_RATE'])
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    config.read(config_file_name)
+    context.bot_data['ADMIN_CHAT_ID'] = int(config['User']['admin_chat_id'])
+
     keyboard = [
         [
             InlineKeyboardButton("➸ Обменять", callback_data='exchange'),
@@ -85,7 +97,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]
         ]
-        await query.edit_message_text(f"📉 Актуальный курс: 1 USDT = {EXCHANGE_RATE} UAH", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text(f"📉 Актуальный курс: 1 USDT = {float(config['Settings']['exchange_rate'])} UAH", reply_markup=InlineKeyboardMarkup(keyboard))
 
     # elif data == 'get_trx':
     #     await query.edit_message_text("💰 Пожалуйста, введите сумму TRX для получения:")
@@ -147,7 +159,7 @@ async def entering_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data['amount'] = amount
     currency = context.user_data.get('currency', 'USDT')
-    sum_uah = amount * EXCHANGE_RATE
+    sum_uah = amount * float(config['Settings']['exchange_rate'])
     context.user_data['sum_uah'] = sum_uah
     # keyboard = [
     #     [InlineKeyboardButton("Отправить", callback_data='send_exchange')],
@@ -287,9 +299,9 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Отправляем пользователю инструкцию и администратору заявку
         await query.message.chat.send_message(
             f"🙏 Спасибо за заявку!\n\n"
-            f"💵 Сумма: {amount} {currency} → {sum_uah:.2f} UAH\n"
+            f"💵 Сумма: {amount} {currency} → {sum_uah:.2f} UAH\n\n"
             f"🏦 Переведите средства на адрес:\n"
-            f"`TMHDhHp3qdT4EuEuFQGWxuZ14EvzDZseac`",
+            f"`{config['Settings']['wallet_address']}`",
             parse_mode='Markdown'
         )
 
@@ -299,7 +311,7 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
             InlineKeyboardButton("✅ Перевод получен", callback_data=f"confirm_payment_{user.id}")
         ]])
 
-        await context.bot.send_message(
+        admin_msg = await context.bot.send_message(
             chat_id=admin_chat_id,
             text=(
                 f"📥 Новая заявка на обмен\n\n"
@@ -311,8 +323,9 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=keyboard,
             parse_mode='Markdown'
         )
-
-        await start(update, context)
+        user_sessions[user.id]['admin_message_id'] = admin_msg.message_id
+        user_sessions[user.id]['admin_chat_id'] = admin_msg.chat_id
+        # await start(update, context)
         return ConversationHandler.END
 
     elif data == 'send_exchange_trx':
@@ -359,22 +372,6 @@ async def confirming_exchange_trx(update: Update, context: ContextTypes.DEFAULT_
         return ConversationHandler.END
 
 
-# async def entering_trx_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     text = update.message.text
-#     try:
-#         amount = float(text.replace(',', '.'))
-#         if amount <= 0:
-#             await update.message.reply_text("Введите число больше нуля.")
-#             return ENTERING_TRX_AMOUNT
-#     except ValueError:
-#         await update.message.reply_text("Пожалуйста, введите корректное число.")
-#         return ENTERING_TRX_AMOUNT
-
-#     context.user_data['trx_amount'] = amount
-#     await update.message.reply_text("Введите адрес TRX для отправки:")
-#     return ENTERING_TRX_ADDRESS
-
-
 async def entering_trx_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     trx_address = update.message.text.strip()
     if not trx_address:
@@ -402,7 +399,7 @@ async def entering_trx_address(update: Update, context: ContextTypes.DEFAULT_TYP
         f"💳 Реквизиты карты: {context.user_data['card_info']}\n"
         f"🆔 ИНН: {inn}\n\n"
         f"⚡ Вам будет отправлено **15 USDT** в TRX для оплаты комиссии.\n\n"
-        f"💱 Сумма обмена с учетом TRX: {amount - 15} {currency} → {(amount - 15) * EXCHANGE_RATE:.2f} UAH\n\n"
+        f"💱 Сумма обмена с учетом TRX: {amount - 15} {currency} → {(amount - 15) * float(config['Settings']['exchange_rate']):.2f} UAH\n\n"
         f"🔗 TRX-адрес: {trx_address}\n\n"
         "👉 Нажмите 'Отправить' для подтверждения.\n\n",
         reply_markup=InlineKeyboardMarkup(keyboard),
@@ -449,7 +446,7 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
         await query.message.chat.send_message(
             f"🙏 Спасибо за заявку!\n\n"
             f"💰 Из общей суммы {amount:.2f} {currency}, вам будет отправлено **15 USDT** в TRX для оплаты комиссии.\n\n"
-            f"💵 Конечная сумма обмена: {amount-15} {currency} = {(amount-15) * EXCHANGE_RATE:.2f} UAH\n\n"
+            f"💵 Конечная сумма обмена: {amount-15} {currency} = {(amount-15) * float(config['Settings']['exchange_rate']):.2f} UAH\n\n"
             f"🏦 Ожидайте, сообщения от бота о успешном переводе TRX ✅\n",
             parse_mode='Markdown'
         )
@@ -461,12 +458,12 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
                                  callback_data=f"confirm_trx_transfer_{user.id}")
         ]])
 
-        await context.bot.send_message(
+        admin_msg = await context.bot.send_message(
             chat_id=admin_chat_id,
             text=(
                 f"📥 Новая заявка на обмен\n\n"
                 f"💱 {amount} {currency} = {sum_uah:.2f} UAH\n\n"
-                f"💵 После вычета TRX: {amount-15} {currency} → {((amount-15) * EXCHANGE_RATE):.2f} UAH\n\n"
+                f"💵 После вычета TRX: {amount-15} {currency} → {((amount-15) * float(config['Settings']['exchange_rate'])):.2f} UAH\n\n"
                 f"{user_info}"
                 f"{transfer_info}"
             ),
@@ -474,7 +471,11 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
             parse_mode='Markdown'
         )
 
-        await start(update, context)
+        # Сохраним message_id и chat_id администратора
+        user_sessions[user.id]['admin_message_id'] = admin_msg.message_id
+        user_sessions[user.id]['admin_chat_id'] = admin_msg.chat_id
+
+        # await start(update, context)
         return ConversationHandler.END
 
     elif data == 'back_to_menu':
@@ -512,7 +513,8 @@ async def handle_transfer_confirmation_trx(update: Update, context: ContextTypes
             text=(
                 f"✅ Перевод TRX выполнен. \n\n"
                 f"📥 Переведите {(amount - 15):.2f} {currency} на кошелек и ожидайте сообщение о получении средств:\n"
-                f"`TMHDhHp3qdT4EuEuFQGWxuZ14EvzDZseac`"),
+                f"`{config['Settings']['wallet_address']}`"
+            ),
             parse_mode='Markdown'
         )
         original_text = query.message.text
@@ -550,7 +552,6 @@ async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFA
                                   callback_data=f"confirm_transfer_{user_id}")]
         ])
         await query.edit_message_text(updated_text, reply_markup=keyboard)
-
     except Exception as e:
         await query.edit_message_text(
             query.message.text + f"\n\n❌ Ошибка при отправке пользователю: {e}"
@@ -565,18 +566,58 @@ async def handle_transfer_confirmation(update: Update, context: ContextTypes.DEF
     user_id = int(data.split('_')[-1])
 
     try:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Подтвердить платёж",
+                                  callback_data=f"user_confirm_transfer_{user_id}")]
+        ])
+
         await context.bot.send_message(
             chat_id=user_id,
-            text="✅ Перевод средств вам выполнен успешно. 💸\n\n🙏 Спасибо за использование нашего сервиса! 🤝"
+            text="✅ Перевод средств вам выполнен успешно. 💸\n\n🙏 Спасибо за использование нашего сервиса! 🤝",
+            reply_markup=keyboard
         )
+
         original_text = query.message.text
         updated_text = original_text + "\n\n✅ Пользователю отправлено подтверждение осуществления перевода."
         await query.edit_message_text(updated_text)
+        user_sessions[user_id]['admin_text'] = updated_text
 
     except Exception as e:
         await query.edit_message_text(
             query.message.text + f"\n\n❌ Ошибка при отправке пользователю: {e}"
         )
+
+
+async def handle_user_confirm_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    user_id = int(data.split('_')[-1])
+
+    try:
+        session = user_sessions.get(user_id)
+        admin_message_id = session.get('admin_message_id')
+        # admin_chat_id = session.get('admin_chat_id')
+
+        # Обновим сообщение администратору
+        original_text = query.message.text
+        updated_text = original_text + "\n\n✅ Спасибо! Подтверждение перевода получено."
+
+        await query.edit_message_text(updated_text)
+
+        # Уведомим админа — если нужно, найдём последнее сообщение админу по user_id
+        admin_chat_id = int(config['User']['ADMIN_CHAT_ID'])
+
+        message = await context.bot.edit_message_text(
+            chat_id=admin_chat_id,
+            message_id=admin_message_id,
+            text=session.get('admin_text', '') + "\n\n✅🛑 Пользователь подтвердил перевод. 🛑✅ ",
+            parse_mode='Markdown'
+        )
+
+    except Exception as e:
+        await query.edit_message_text(query.message.text + f"\n\n❌ Ошибка: {e} \n\n Свяжитесь с контактным лицом: {config['Settings']['SUPPORT_CONTACT']}")
 
 
 def main():
@@ -601,15 +642,35 @@ def main():
         },
         fallbacks=[CommandHandler('start', start)],
     )
+
+    admin_handler = ConversationHandler(
+        entry_points=[CommandHandler('a', admin_panel.admin_panel_start)],
+        states={
+            ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_panel.admin_panel_password)],
+            ADMIN_MENU: [CallbackQueryHandler(admin_panel.admin_panel_handler)],
+        },
+        fallbacks=[CommandHandler('a', admin_panel.admin_panel_start)]
+    )
+
+    # application.add_handler(CallbackQueryHandler(
+    #     admin_panel.admin_panel_handler, pattern='^admin_'))
+    # application.add_handler(CallbackQueryHandler(
+    #     admin_panel.admin_panel_password))
+    application.add_handler(admin_handler)
+
     application.add_handler(CallbackQueryHandler(
         handle_payment_confirmation, pattern=r'^confirm_payment_'))
     application.add_handler(CallbackQueryHandler(
         handle_transfer_confirmation, pattern=r'^confirm_transfer_'))
     application.add_handler(CallbackQueryHandler(
         handle_transfer_confirmation_trx, pattern=r'^confirm_trx_transfer_'))
+    application.add_handler(CallbackQueryHandler(
+        handle_user_confirm_transfer, pattern=r'^user_confirm_transfer_'))
     application.add_handler(CommandHandler('start', start))
+    application.add_handler(CommandHandler('a', admin_panel.admin_panel_start))
     application.add_handler(conv_handler)
 
+    print("Bot started successfully!")
     application.run_polling()
 
 
