@@ -16,7 +16,6 @@ import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
-ASK_PASSWORD, ADMIN_MENU = range(2)
 
 (
     CHOOSING_CURRENCY,
@@ -66,18 +65,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("➸ Обменять", callback_data='exchange'),
-            # InlineKeyboardButton("💰 Получить TRX", callback_data='get_trx'),
             InlineKeyboardButton("📉 Курс", callback_data='rate'),
+            InlineKeyboardButton("🛠 Помощь", callback_data='user_help'),
+            # InlineKeyboardButton("💰 Поо", callback_data='get_trx'),
 
         ],
         # [
         #     InlineKeyboardButton("📦 Статус заявки", callback_data='status'),
         #     InlineKeyboardButton("🏰 Рефералка", callback_data='referral'),
-        #     InlineKeyboardButton("🛠 Помощь", callback_data='help'),
         # ]
     ]
     text = (
-        "👋 Привет! Добро пожаловать в Crypto-Exchange Bot 💱\n\n"
+        "👋 Привет! Добро пожаловать в SafePay Bot 💱\n\n"
         "🧲 Обмен быстрый и удобный.\n\n"
         "🌟 Выбери раздел:"
     )
@@ -89,6 +88,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    config.read(config_file_name)
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -121,7 +121,14 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # elif data == 'help':
     #     await query.edit_message_text("🔧 Помощь: Напиши @admin по любым вопросам")
-
+    elif data == 'user_help':
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]
+        ]
+        await query.edit_message_text(
+            f"🔧 Помощь: Напиши {config['Settings']['SUPPORT_CONTACT']} по любым вопросам относительно бота.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     elif data == 'back_to_menu':
         await start(update, context)
         return ConversationHandler.END
@@ -646,10 +653,16 @@ def main():
     admin_handler = ConversationHandler(
         entry_points=[CommandHandler('a', admin_panel.admin_panel_start)],
         states={
-            ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_panel.admin_panel_password)],
-            ADMIN_MENU: [CallbackQueryHandler(admin_panel.admin_panel_handler)],
+            admin_panel.ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_panel.admin_panel_password)],
+            admin_panel.ADMIN_MENU: [CallbackQueryHandler(admin_panel.admin_panel_handler)],
+            admin_panel.SETTINGS_MENU: [CallbackQueryHandler(admin_panel.admin_panel_handler)],
+            admin_panel.SET_NEW_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_panel.set_new_password)],
+            admin_panel.SET_EXCHANGE_RATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_panel.set_exchange_rate)],
+            admin_panel.SET_WALLET: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_panel.set_wallet)],
+            admin_panel.SET_SUPPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_panel.set_support_contact)],
         },
-        fallbacks=[CommandHandler('a', admin_panel.admin_panel_start)]
+        fallbacks=[CommandHandler('a', admin_panel.admin_panel_start),
+                   CommandHandler('ac', admin_panel.admin_panel_close)]
     )
 
     # application.add_handler(CallbackQueryHandler(
