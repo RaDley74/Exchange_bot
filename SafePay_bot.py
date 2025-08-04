@@ -14,7 +14,7 @@ import logging
 import Config
 import warnings
 import logging
-
+import request_for_exchange
 import os
 logging.basicConfig(
     level=logging.INFO,
@@ -71,15 +71,15 @@ class SafePayBot:
         self.application = ApplicationBuilder().token(self.token).post_init(self.post_init).build()
 
         self.SafePay_bot = ConversationHandler(
-            entry_points=[CallbackQueryHandler(self.handel_user_menu, pattern='^user_')],
+            entry_points=[CallbackQueryHandler(self.handel_user_menu)],
             states={
                 self.CHOOSING_CURRENCY: [CallbackQueryHandler(self.choosing_currency, pattern='^user_')],
                 self.ENTERING_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_amount)],
                 self.ENTERING_BANK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_bank_name)],
-                # self.ENTERING_CARD_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_card_details)],
-                # self.ENTERING_FIO_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_fio_details)],
-                # self.ENTERING_INN_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_inn_details)],
-                # self.CONFIRMING_EXCHANGE: [CallbackQueryHandler(self.confirming_exchange)],
+                self.ENTERING_CARD_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_card_details)],
+                self.ENTERING_FIO_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_fio_details)],
+                self.ENTERING_INN_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_inn_details)],
+                self.CONFIRMING_EXCHANGE: [CallbackQueryHandler(self.confirming_exchange)],
                 # self.CONFIRMING_EXCHANGE_TRX: [CallbackQueryHandler(self.confirming_exchange_trx)],
                 # self.ENTERING_TRX_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_trx_address)],
                 # self.FINAL_CONFIRMING_EXCHANGE_TRX: [CallbackQueryHandler(self.final_confirming_exchange_trx)],
@@ -329,69 +329,76 @@ class SafePayBot:
         self.bank_name = context.user_data.get('bank_name', '')
         self.inn = context.user_data.get('inn', '')
         self.card_info = context.user_data.get('card_info', '')
-
+        self.user_id = self.user.id
+        self.user_first_name = self.user.username or 'нету'
+        self.user_username = self.user.username if self.user.username else 'нету'
         self.user_sessions[self.user.id] = context.user_data.copy()
 
-        user_info = (
-            f"👤 Пользователь:\n"
-            f"🆔 ID: `{self.user.id}`\n"
-            f"📛 Имя: `{self.user.first_name or '-'}`\n"
-            f"🔗 Юзернейм: @{self.user.username if self.user.username else 'нет'}\n\n"
-        )
+        # user_info = (
+        #     f"👤 Пользователь:\n"
+        #     f"🆔 ID: `{self.user.id}`\n"
+        #     f"📛 Имя: `{self.user.first_name or '-'}`\n"
+        #     f"🔗 Юзернейм: @{self.user.username if self.user.username else 'нет'}\n\n"
+        # )
 
-        transfer_info = (
-            f"🏦 Банк: `{self.bank_name}`\n"
-            f"📝 ФИО: `{self.fio}`\n"
-            f"💳 Реквизиты карты: `{self.card_info}`\n"
-            f"📇 ИНН: `{self.inn}`\n\n"
-        )
+        # transfer_info = (
+        #     f"🏦 Банк: `{self.bank_name}`\n"
+        #     f"📝 ФИО: `{self.fio}`\n"
+        #     f"💳 Реквизиты карты: `{self.card_info}`\n"
+        #     f"📇 ИНН: `{self.inn}`\n\n"
+        # )
 
         if self.data == 'user_send_exchange':
-            logger.info(
-                f"Creating standard exchange request for user {self.user.id}. Amount: {self.amount} {self.currency}")
-            await self.query.message.chat.send_message(
-                f"🙏 Спасибо за заявку!\n\n"
-                f"💵 Сумма: {self.amount} {self.currency} → {self.sum_uah:.2f} UAH\n\n"
-                f"🏦 Переведите средства на адрес:\n"
-                f"`{self.config.get_wallet_address()}`\n\n",
-                parse_mode='Markdown'
-            )
-
-            admin_chat_id = self.config.get_admin_chat_id
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Перевод получен",
-                                     callback_data=f"confirm_payment_{self.user.id}")
-            ]])
-
-            admin_msg = await context.bot.send_message(
-                chat_id=admin_chat_id,
-                text=(
-                    f"📥 Новая заявка на обмен\n\n"
-                    f"💱 {self.amount} {self.currency} → {self.sum_uah:.2f} UAH\n\n"
-                    f"{user_info}"
-                    f"{transfer_info}"
-                ),
-                reply_markup=keyboard,
-                parse_mode='Markdown'
-            )
-            self.user_sessions[self.user.id]['admin_message_id'] = admin_msg.message_id
-            self.user_sessions[self.user.id]['admin_chat_id'] = admin_msg.chat_id
-            logger.info(f"Exchange request for user {self.user.id} sent to admin {admin_chat_id}.")
+            self.exchange_request = request_for_exchange.RequestForExchange(
+                bot=self, update=update, context=context)
+            await self.exchange_request.send_admin_notification(update, context, query=self.query)
             return ConversationHandler.END
 
-        elif self.data == 'send_exchange_trx':
-            logger.info(f"User {self.user.id} chose to receive TRX for commission.")
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Согласен", callback_data='user_send_transfer_trx')],
-                [InlineKeyboardButton("❌ Не согласен", callback_data='user_menu_back_to_menu')]
-            ])
+        #     logger.info(
+        #         f"Creating standard exchange request for user {self.user.id}. Amount: {self.amount} {self.currency}")
+        #     await self.query.message.chat.send_message(
+        #         f"🙏 Спасибо за заявку!\n\n"
+        #         f"💵 Сумма: {self.amount} {self.currency} → {self.sum_uah:.2f} UAH\n\n"
+        #         f"🏦 Переведите средства на адрес:\n"
+        #         f"`{self.config.get_wallet_address()}`\n\n",
+        #         parse_mode='Markdown'
+        #     )
 
-            await self.query.edit_message_text(
-                "⚡ Вам будет предоставлено **15 USDT** в TRX для оплаты комиссии перевода, которые будут отняты из общей суммы обмена.\n\n"
-                "💡 Эти средства позволят безопасно и быстро завершить транзакцию.",
-                reply_markup=keyboard, parse_mode='Markdown'
-            )
-            return ConversationHandler.END
+        #     admin_chat_id = self.config.get_admin_chat_id
+        #     keyboard = InlineKeyboardMarkup([[
+        #         InlineKeyboardButton("✅ Перевод получен",
+        #                              callback_data=f"confirm_payment_{self.user.id}")
+        #     ]])
+
+        #     admin_msg = await context.bot.send_message(
+        #         chat_id=admin_chat_id,
+        #         text=(
+        #             f"📥 Новая заявка на обмен\n\n"
+        #             f"💱 {self.amount} {self.currency} → {self.sum_uah:.2f} UAH\n\n"
+        #             f"{user_info}"
+        #             f"{transfer_info}"
+        #         ),
+        #         reply_markup=keyboard,
+        #         parse_mode='Markdown'
+        #     )
+        #     self.user_sessions[self.user.id]['admin_message_id'] = admin_msg.message_id
+        #     self.user_sessions[self.user.id]['admin_chat_id'] = admin_msg.chat_id
+        #     logger.info(f"Exchange request for user {self.user.id} sent to admin {admin_chat_id}.")
+        #     return ConversationHandler.END
+
+        # elif self.data == 'send_exchange_trx':
+        #     logger.info(f"User {self.user.id} chose to receive TRX for commission.")
+        #     keyboard = InlineKeyboardMarkup([
+        #         [InlineKeyboardButton("✅ Согласен", callback_data='user_send_transfer_trx')],
+        #         [InlineKeyboardButton("❌ Не согласен", callback_data='user_menu_back_to_menu')]
+        #     ])
+
+        #     await self.query.edit_message_text(
+        #         "⚡ Вам будет предоставлено **15 USDT** в TRX для оплаты комиссии перевода, которые будут отняты из общей суммы обмена.\n\n"
+        #         "💡 Эти средства позволят безопасно и быстро завершить транзакцию.",
+        #         reply_markup=keyboard, parse_mode='Markdown'
+        #     )
+        return ConversationHandler.END  # change to END to avoid further processing
 
 
 if __name__ == "__main__":
