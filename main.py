@@ -16,7 +16,6 @@ from telegram.ext import (
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot, MenuButtonCommands
 
 
-
 # --- Настройка логирования ---
 logging.basicConfig(
     level=logging.INFO,
@@ -734,7 +733,8 @@ async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFA
                     chat_id=admin_id,
                     message_id=message_id,
                     text=updated_text,
-                    reply_markup=keyboard
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
                 )
             except Exception as e:
                 logger.error(f"Не удалось обновить сообщение у админа {admin_id}: {e}")
@@ -778,7 +778,8 @@ async def handle_transfer_confirmation(update: Update, context: ContextTypes.DEF
                 await context.bot.edit_message_text(
                     chat_id=admin_id,
                     message_id=message_id,
-                    text=updated_text
+                    text=updated_text,
+                    parse_mode='Markdown',
                 )
             except Exception as e:
                 logger.error(f"Не удалось обновить сообщение у админа {admin_id}: {e}")
