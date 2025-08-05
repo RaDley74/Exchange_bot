@@ -86,8 +86,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     logger.info(f"User {user.id} ({user.username}) started the bot.")
     config.read(config_file_name, encoding='utf-8')
-    # ИЗМЕНЕНИЕ: Мы больше не храним один ID, а получаем список при необходимости
-    # context.bot_data['ADMIN_CHAT_ID'] = ... - эту строку можно убрать
 
     keyboard = [
         [
@@ -108,7 +106,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
-# ... (остальные функции до confirming_exchange без изменений)
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -297,7 +294,6 @@ async def entering_inn_details(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (код внутри функции до отправки админу)
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -347,11 +343,9 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
             reply_markup=user_keyboard
         )
 
-        # --- ИЗМЕНЕНИЕ: Отправляем сообщение КАЖДОМУ админу ---
         admin_ids = get_admin_ids()
         if not admin_ids:
             logger.error("Не найдены ID администраторов для отправки уведомления.")
-            # Можно добавить ответ пользователю, что что-то пошло не так
             return ConversationHandler.END
 
         text_for_admin = (
@@ -361,27 +355,31 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"{transfer_info}"
         )
 
-        # Словарь для хранения ID сообщений для каждого админа
+        # Добавлена кнопка "Отказать" для начальной заявки
+        admin_keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("❌ Отказать",
+                                 callback_data=f"decline_request_{user.id}")
+        ]])
+
         admin_message_ids = {}
         for admin_id in admin_ids:
             try:
                 admin_msg = await context.bot.send_message(
                     chat_id=admin_id,
                     text=text_for_admin,
-                    parse_mode='Markdown'
+                    parse_mode='Markdown',
+                    reply_markup=admin_keyboard
                 )
                 admin_message_ids[admin_id] = admin_msg.message_id
             except Exception as e:
                 logger.error(f"Не удалось отправить сообщение админу {admin_id}: {e}")
 
-        # Сохраняем словарь с ID сообщений в сессию
         user_sessions[user.id]['admin_message_ids'] = admin_message_ids
         user_sessions[user.id]['admin_text'] = text_for_admin
 
         logger.info(f"Exchange request for user {user.id} sent to admins: {admin_ids}")
         return ConversationHandler.END
 
-    # ... (остальная часть функции confirming_exchange без изменений)
     elif data == 'send_exchange_trx':
         logger.info(f"User {user.id} chose to receive TRX for commission.")
         keyboard = InlineKeyboardMarkup([
@@ -408,7 +406,6 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
 
-# ... (функции до final_confirming_exchange_trx без изменений)
 async def confirming_exchange_trx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -473,7 +470,6 @@ async def entering_trx_address(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (код внутри функции до отправки админу)
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -518,7 +514,6 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
             parse_mode='Markdown'
         )
 
-        # --- ИЗМЕНЕНИЕ: Отправляем сообщение КАЖДОМУ админу ---
         admin_ids = get_admin_ids()
         if not admin_ids:
             logger.error("Не найдены ID администраторов для отправки уведомления.")
@@ -526,7 +521,9 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
 
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ TRX переведено",
-                                 callback_data=f"confirm_trx_transfer_{user.id}")
+                                 callback_data=f"confirm_trx_transfer_{user.id}"),
+            InlineKeyboardButton("❌ Отказать",
+                                 callback_data=f"decline_request_{user.id}")
         ]])
 
         text_for_admin = (
@@ -555,7 +552,6 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
 
         logger.info(f"TRX exchange request for user {user.id} sent to admins: {admin_ids}.")
         return ConversationHandler.END
-    # ... (остальная часть функции final_confirming_exchange_trx без изменений)
     elif data == 'back_to_menu':
         logger.info(f"User {user.id} cancelled the TRX exchange.")
         await start(update, context)
@@ -569,7 +565,6 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
         return ConversationHandler.END
 
 
-# ... (функции до process_hash без изменений)
 async def handle_transfer_confirmation_trx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -605,7 +600,6 @@ async def handle_transfer_confirmation_trx(update: Update, context: ContextTypes
         )
         logger.info(f"Sent TRX transfer confirmation message to user {user_id}.")
 
-        # Обновляем сообщение у ВСЕХ админов
         original_text = session.get('admin_text', '')
         updated_text = original_text + "\n\n✅1️⃣ Сообщение о успешном переводе TRX отправлено"
         session['admin_text_after_trx'] = updated_text
@@ -623,7 +617,6 @@ async def handle_transfer_confirmation_trx(update: Update, context: ContextTypes
 
     except Exception as e:
         logger.error(f"Failed to send TRX confirmation to user {user_id}: {e}", exc_info=True)
-        # Отвечаем админу, который нажал кнопку
         await query.edit_message_text(
             query.message.text + f"\n\n❌ Ошибка при отправке пользователю: {e}"
         )
@@ -652,15 +645,16 @@ async def process_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session_user_id = context.user_data.get('session_user_id')
 
     if not session_user_id:
-        # ... (код без изменений)
+        logger.warning(f"Process hash failed: No session_user_id found for user {user.id}")
+        await update.message.reply_text("Произошла ошибка сессии. Пожалуйста, начните сначала: /start")
         return ConversationHandler.END
 
     session = user_sessions.get(session_user_id)
     if not session:
-        # ... (код без изменений)
+        logger.warning(f"Process hash failed: No session data found for user_id {session_user_id}")
+        await update.message.reply_text("Произошла ошибка сессии. Пожалуйста, начните сначала: /start")
         return ConversationHandler.END
 
-    # ИЗМЕНЕНИЕ: Получаем словарь с ID сообщений админов
     admin_message_ids = session.get('admin_message_ids', {})
 
     base_admin_text = ""
@@ -677,12 +671,13 @@ async def process_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"\n\n✅2️⃣ Пользователь подтвердил перевод. Hash: `{submitted_hash}`"
     session['admin_text'] = final_admin_text
 
-    admin_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Средства от клиента получены",
-                              callback_data=f"confirm_payment_{session_user_id}")]
-    ])
+    admin_keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Средства от клиента получены",
+                             callback_data=f"confirm_payment_{session_user_id}"),
+        InlineKeyboardButton("❌ Отказать",
+                             callback_data=f"decline_request_{session_user_id}")
+    ]])
 
-    # ИЗМЕНЕНИЕ: Обновляем сообщение у КАЖДОГО админа
     for admin_id, message_id in admin_message_ids.items():
         try:
             await context.bot.edit_message_text(
@@ -720,12 +715,13 @@ async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFA
             f"\n\n✅3️⃣ Пользователю {user_id} отправлено подтверждение получения средств."
         session['admin_text'] = updated_text
 
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Перевод клиенту сделан",
-                                  callback_data=f"confirm_transfer_{user_id}")]
-        ])
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Перевод клиенту сделан",
+                                 callback_data=f"confirm_transfer_{user_id}"),
+            InlineKeyboardButton("❌ Отказать",
+                                 callback_data=f"decline_request_{user_id}")
+        ]])
 
-        # ИЗМЕНЕНИЕ: Обновляем сообщение у ВСЕХ админов
         admin_message_ids = session.get('admin_message_ids', {})
         for admin_id, message_id in admin_message_ids.items():
             try:
@@ -771,7 +767,6 @@ async def handle_transfer_confirmation(update: Update, context: ContextTypes.DEF
         updated_text = original_text + "\n\n✅4️⃣ Пользователю отправлено подтверждение осуществления перевода."
         session['admin_text'] = updated_text
 
-        # ИЗМЕНЕНИЕ: Обновляем сообщение у ВСЕХ админов, убирая кнопки
         admin_message_ids = session.get('admin_message_ids', {})
         for admin_id, message_id in admin_message_ids.items():
             try:
@@ -802,18 +797,15 @@ async def handle_user_confirm_transfer(update: Update, context: ContextTypes.DEF
     try:
         session = user_sessions.get(user_id)
         if not session:
-            # ... (код без изменений)
+            logger.warning(f"Could not find session for user {user_id} to confirm transfer.")
+            await query.edit_message_text(query.message.text + "\n\n✅ Подтверждение получено.")
             return
 
-        # ИЗМЕНЕНИЕ: Получаем ID сообщений для всех админов
         admin_message_ids = session.get('admin_message_ids', {})
-
-        # Обновляем сообщение пользователя
         original_text = query.message.text
         updated_text = original_text + "\n\n✅ Спасибо! Подтверждение перевода получено."
         await query.edit_message_text(updated_text)
 
-        # Уведомляем ВСЕХ админов
         if admin_message_ids:
             admin_text_before_final_confirm = session.get('admin_text', '')
             final_admin_text = admin_text_before_final_confirm + "\n\n✅🛑 Пользователь подтвердил перевод. 🛑✅ "
@@ -840,12 +832,67 @@ async def handle_user_confirm_transfer(update: Update, context: ContextTypes.DEF
             logger.info(f"Session for user {user_id} has been cleared.")
 
     except Exception as e:
-        # ... (код без изменений)
+        logger.error(f"Error handling user final transfer confirmation: {e}", exc_info=True)
         pass
 
 
+async def handle_decline_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает отказ администратора в обслуживании заявки."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = int(data.split('_')[-1])
+    admin_user = query.from_user
+    logger.info(f"Admin {admin_user.id} declined the request for user {user_id}.")
+
+    config.read(config_file_name, encoding='utf-8')
+    support_contact = config['Settings'].get('support_contact', 'администратора')
+
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=(
+                f"❌ Ваша заявка была отклонена.\n\n"
+                f"По всем вопросам обращайтесь в службу поддержки: {support_contact}"
+            )
+        )
+        logger.info(f"Sent decline notification to user {user_id}.")
+    except Exception as e:
+        logger.error(f"Failed to send decline notification to user {user_id}: {e}")
+        await query.follow_up.send(text=f"Не удалось уведомить пользователя {user_id}. Ошибка: {e}")
+
+    session = user_sessions.get(user_id)
+    if session and 'admin_message_ids' in session:
+        admin_message_ids = session.get('admin_message_ids', {})
+        admin_text = session.get('admin_text', 'Текст заявки не найден.')
+        updated_text = admin_text + \
+            f"\n\n❌ ЗАЯВКА ОТКЛОНЕНА (администратором @{admin_user.username or admin_user.id})"
+
+        for admin_id, message_id in admin_message_ids.items():
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=admin_id,
+                    message_id=message_id,
+                    text=updated_text,
+                    parse_mode='Markdown',
+                    reply_markup=None
+                )
+            except Exception as e:
+                logger.error(f"Failed to update decline status for admin {admin_id}: {e}")
+    else:
+        logger.warning(f"Could not find session for user {user_id} to update with decline status.")
+        await query.edit_message_text(
+            query.message.text +
+            f"\n\n❌ ЗАЯВКА ОТКЛОНЕНА (администратором @{admin_user.username or admin_user.id})",
+            reply_markup=None
+        )
+
+    if user_id in user_sessions:
+        del user_sessions[user_id]
+        logger.info(f"Session for user {user_id} has been cleared after decline.")
+
+
 def main():
-    # ... (код в функции main без изменений)
     if sys.platform == "win32":
         sys.stdout.reconfigure(encoding='utf-8')
         sys.stderr.reconfigure(encoding='utf-8')
@@ -896,6 +943,8 @@ def main():
 
     application.add_handler(admin_handler)
     application.add_handler(hash_handler)
+    application.add_handler(CallbackQueryHandler(
+        handle_decline_request, pattern=r'^decline_request_'))
     application.add_handler(CallbackQueryHandler(
         handle_payment_confirmation, pattern=r'^confirm_payment_'))
     application.add_handler(CallbackQueryHandler(
