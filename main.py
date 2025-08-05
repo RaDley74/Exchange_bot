@@ -13,17 +13,16 @@ import os
 import admin_panel
 import warnings
 import logging
+import sys
 
 # --- Настройка логирования ---
-# Устанавливаем базовую конфигурацию для логирования.
-# Логи будут записываться в файл 'bot.log' и выводиться в консоль.
-# Уровень логирования INFO означает, что будут записываться все информационные сообщения и выше (WARNING, ERROR, CRITICAL).
+# Это исправление гарантирует, что и файл логов, и вывод в консоль будут использовать UTF-8.
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("bot.log"),
-        logging.StreamHandler()
+        logging.FileHandler("bot.log", encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)  # Явно указываем поток вывода
     ]
 )
 # Получаем объект логгера для текущего модуля.
@@ -46,8 +45,9 @@ warnings.filterwarnings("ignore", category=UserWarning)
     CONFIRMING_EXCHANGE,
     CONFIRMING_EXCHANGE_TRX,
     ENTERING_TRX_ADDRESS,
-    FINAL_CONFIRMING_EXCHANGE_TRX
-) = range(10)
+    FINAL_CONFIRMING_EXCHANGE_TRX,
+    ENTERING_HASH,  # Новое состояние для ожидания хеша
+) = range(11)
 
 config_file_name = 'settings.ini'
 config = configparser.ConfigParser()
@@ -66,7 +66,7 @@ if not os.path.exists(config_file_name):
         'SUPPORT_CONTACT': 'your_support_contact_here'
     }
 
-    with open(config_file_name, 'w') as config_file:
+    with open(config_file_name, 'w', encoding='utf-8') as config_file:
         config.write(config_file)
 
     logger.info(f"Configuration file '{config_file_name}' created. Please edit it and restart.")
@@ -76,14 +76,14 @@ if not os.path.exists(config_file_name):
     exit(0)
 
 else:
-    config.read(config_file_name)
+    config.read(config_file_name, encoding='utf-8')
     logger.info(f"Configuration file '{config_file_name}' loaded successfully.")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     logger.info(f"User {user.id} ({user.username}) started the bot.")
-    config.read(config_file_name)
+    config.read(config_file_name, encoding='utf-8')
     context.bot_data['ADMIN_CHAT_ID'] = int(config['User']['admin_chat_id'])
 
     keyboard = [
@@ -112,7 +112,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
     logger.info(f"User {user.id} ({user.username}) selected menu option: {data}")
 
-    config.read(config_file_name)
+    config.read(config_file_name, encoding='utf-8')
 
     if data == 'rate':
         keyboard = [
@@ -280,10 +280,10 @@ async def entering_inn_details(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await update.message.reply_text(
         f"💰 Вы хотите обменять {amount} {currency} на {sum_uah:.2f} UAH.\n\n"
-        f"🏦 Банк: {bank_name}\n"
-        f"👤 ФИО: {fio}\n"
-        f"💳 Реквизиты карты: {context.user_data['card_info']}\n"
-        f"🆔 ИНН: {inn}\n\n"
+        f"🏦 Банк: `{bank_name}`\n"
+        f"👤 ФИО: `{fio}`\n"
+        f"💳 Реквизиты карты: `{context.user_data['card_info']}`\n"
+        f"🆔 ИНН: `{inn}`\n\n"
         "👉 Нажмите 'Отправить' для подтверждения.\n\n"
         "⚡ В случае если вам нужен TRX, нажмите соответствующую кнопку.",
         reply_markup=InlineKeyboardMarkup(keyboard),
@@ -327,33 +327,44 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
     if data == 'send_exchange':
         logger.info(
             f"Creating standard exchange request for user {user.id}. Amount: {amount} {currency}")
+
+        # --- ИЗМЕНЕНИЕ: Добавляем кнопку для запроса хеша ---
+        user_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Я совершил(а) перевод",
+                                  callback_data=f"user_confirms_sending_{user.id}")]
+        ])
+
         await query.message.chat.send_message(
             f"🙏 Спасибо за заявку!\n\n"
             f"💵 Сумма: {amount} {currency} → {sum_uah:.2f} UAH\n\n"
             f"🏦 Переведите средства на адрес:\n"
-            f"`{config['Settings']['wallet_address']}`",
-            parse_mode='Markdown'
+            f"`{config['Settings']['wallet_address']}`\n\n"
+            "После совершения перевода, нажмите кнопку ниже, чтобы предоставить хэш транзакции.",
+            parse_mode='Markdown',
+            reply_markup=user_keyboard
         )
 
         admin_chat_id = config['User']['ADMIN_CHAT_ID']
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Перевод получен", callback_data=f"confirm_payment_{user.id}")
-        ]])
 
+        text_for_admin = (
+            f"📥 Новая заявка на обмен\n\n"
+            f"💱 {amount} {currency} → {sum_uah:.2f} UAH\n\n"
+            f"{user_info}"
+            f"{transfer_info}"
+        )
+
+        # --- ИЗМЕНЕНИЕ: Отправляем админу сообщение БЕЗ кнопок ---
         admin_msg = await context.bot.send_message(
             chat_id=admin_chat_id,
-            text=(
-                f"📥 Новая заявка на обмен\n\n"
-                f"💱 {amount} {currency} → {sum_uah:.2f} UAH\n\n"
-                f"{user_info}"
-                f"{transfer_info}"
-            ),
-            reply_markup=keyboard,
+            text=text_for_admin,
             parse_mode='Markdown'
         )
         user_sessions[user.id]['admin_message_id'] = admin_msg.message_id
         user_sessions[user.id]['admin_chat_id'] = admin_msg.chat_id
-        logger.info(f"Exchange request for user {user.id} sent to admin {admin_chat_id}.")
+        # Сохраняем текст для будущего редактирования
+        user_sessions[user.id]['admin_text'] = admin_msg.text
+        logger.info(
+            f"Exchange request for user {user.id} sent to admin {admin_chat_id}. Waiting for user's hash.")
         return ConversationHandler.END
 
     elif data == 'send_exchange_trx':
@@ -461,6 +472,8 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
     trx_address = context.user_data.get('trx_address', '')
     card_info = context.user_data['card_info']
 
+    user_sessions[user.id] = context.user_data.copy()
+
     user_info = (
         f"👤 Пользователь:\n"
         f"🆔 ID: `{user.id}`\n"
@@ -494,21 +507,24 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
                                  callback_data=f"confirm_trx_transfer_{user.id}")
         ]])
 
+        text_for_admin = (
+            f"📥 Новая заявка на обмен\n\n"
+            f"💱 {amount} {currency} = {sum_uah:.2f} UAH\n\n"
+            f"💵 После вычета TRX: {amount-15} {currency} → {((amount-15) * float(config['Settings']['exchange_rate'])):.2f} UAH\n\n"
+            f"{user_info}"
+            f"{transfer_info}"
+        )
+
         admin_msg = await context.bot.send_message(
             chat_id=admin_chat_id,
-            text=(
-                f"📥 Новая заявка на обмен\n\n"
-                f"💱 {amount} {currency} = {sum_uah:.2f} UAH\n\n"
-                f"💵 После вычета TRX: {amount-15} {currency} → {((amount-15) * float(config['Settings']['exchange_rate'])):.2f} UAH\n\n"
-                f"{user_info}"
-                f"{transfer_info}"
-            ),
+            text=text_for_admin,
             reply_markup=keyboard,
             parse_mode='Markdown'
         )
 
         user_sessions[user.id]['admin_message_id'] = admin_msg.message_id
         user_sessions[user.id]['admin_chat_id'] = admin_msg.chat_id
+        user_sessions[user.id]['admin_text'] = text_for_admin  # Сохраняем исходный текст
         logger.info(f"TRX exchange request for user {user.id} sent to admin {admin_chat_id}.")
         return ConversationHandler.END
 
@@ -533,39 +549,125 @@ async def handle_transfer_confirmation_trx(update: Update, context: ContextTypes
     logger.info(f"Admin confirmed TRX transfer to user {user_id}.")
 
     session = user_sessions.get(user_id)
-    if session:
-        amount = session.get('amount', 0)
-        currency = session.get('currency', 'USDT')
-    else:
+    if not session:
         logger.warning(f"No session found for user {user_id} during TRX transfer confirmation.")
-        amount = 0
-        currency = 'USDT'
+        await query.edit_message_text(query.message.text + "\n\n❌ Сессия пользователя не найдена.")
+        return
+
+    amount = session.get('amount', 0)
+    currency = session.get('currency', 'USDT')
 
     try:
+        # Кнопка для пользователя, чтобы он подтвердил перевод и начал диалог для отправки хеша
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Я совершил(а) перевод",
+                                  callback_data=f"user_confirms_sending_{user_id}")]
+        ])
+
         await context.bot.send_message(
             chat_id=user_id,
             text=(
                 f"✅ Перевод TRX выполнен. \n\n"
-                f"📥 Переведите {(amount - 15):.2f} {currency} на кошелек и ожидайте сообщение о получении средств:\n"
-                f"`{config['Settings']['wallet_address']}`"
+                f"📥 Переведите {(amount - 15):.2f} {currency} на кошелек:\n"
+                f"`{config['Settings']['wallet_address']}`\n\n"
+                "После совершения перевода, нажмите кнопку ниже, чтобы предоставить хэш транзакции."
             ),
+            reply_markup=keyboard,
             parse_mode='Markdown'
         )
         logger.info(f"Sent TRX transfer confirmation message to user {user_id}.")
 
-        original_text = query.message.text
-        updated_text = original_text + "\n\n✅ Сообщение о успешном переводе TRX отправлено"
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Средства от клиента получены",
-                                  callback_data=f"confirm_payment_{user_id}")]
-        ])
-        await query.edit_message_text(updated_text, reply_markup=keyboard)
+        # Обновляем сообщение у админа
+        original_text = session.get('admin_text', query.message.text)
+        updated_text = original_text + "\n\n✅1️⃣ Сообщение о успешном переводе TRX отправлено"
+
+        # Сохраняем этот обновленный текст в сессию для следующего шага
+        session['admin_text_after_trx'] = updated_text
+
+        await query.edit_message_text(updated_text)
 
     except Exception as e:
         logger.error(f"Failed to send TRX confirmation to user {user_id}: {e}", exc_info=True)
         await query.edit_message_text(
             query.message.text + f"\n\n❌ Ошибка при отправке пользователю: {e}"
         )
+
+
+async def ask_for_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Запрашивает у пользователя хеш транзакции."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = int(query.data.split('_')[-1])
+    context.user_data['session_user_id'] = user_id
+
+    logger.info(f"User {query.from_user.id} will provide the transaction hash.")
+
+    await query.edit_message_text(
+        text="✍️ Пожалуйста, отправьте хэш вашей транзакции:"
+    )
+
+    return ENTERING_HASH
+
+
+async def process_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ОБНОВЛЕННАЯ УНИВЕРСАЛЬНАЯ ФУНКЦИЯ: Обрабатывает хеш, отправленный пользователем."""
+    user = update.effective_user
+    submitted_hash = update.message.text
+    session_user_id = context.user_data.get('session_user_id')
+
+    if not session_user_id:
+        logger.error(f"Could not find session_user_id in context for user {user.id}")
+        await update.message.reply_text("Произошла внутренняя ошибка. Свяжитесь с поддержкой.")
+        return ConversationHandler.END
+
+    logger.info(f"User {user.id} submitted hash: {submitted_hash}")
+
+    session = user_sessions.get(session_user_id)
+    if not session:
+        logger.warning(f"No session found for user_id {session_user_id} when processing hash.")
+        await update.message.reply_text("Произошла ошибка сессии. Пожалуйста, свяжитесь с поддержкой.")
+        return ConversationHandler.END
+
+    admin_message_id = session.get('admin_message_id')
+    admin_chat_id = int(config['User']['ADMIN_CHAT_ID'])
+
+    # --- ИЗМЕНЕНИЕ: Определяем, какой текст использовать (для TRX или стандартного обмена) ---
+    base_admin_text = ""
+    if 'admin_text_after_trx' in session:
+        base_admin_text = session.get('admin_text_after_trx', '')
+    else:
+        base_admin_text = session.get('admin_text', '')
+
+    if not base_admin_text:
+        logger.error(f"Could not retrieve base admin text for user {session_user_id}")
+        base_admin_text = "⚠️ Ошибка: не удалось получить исходный текст заявки."
+
+    final_admin_text = base_admin_text + \
+        f"\n\n✅2️⃣ Пользователь подтвердил перевод. Hash: `{submitted_hash}`"
+    session['admin_text'] = final_admin_text  # Перезаписываем текст для следующих шагов
+
+    # Создаем кнопку для админа, чтобы он мог подтвердить получение средств
+    admin_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Средства от клиента получены",
+                              callback_data=f"confirm_payment_{session_user_id}")]
+    ])
+
+    try:
+        await context.bot.edit_message_text(
+            chat_id=admin_chat_id,
+            message_id=admin_message_id,
+            text=final_admin_text,
+            reply_markup=admin_keyboard,
+            parse_mode='Markdown'
+        )
+        logger.info(f"Admin message for user {session_user_id} updated with hash.")
+    except Exception as e:
+        logger.error(f"Failed to update admin message with hash for user {session_user_id}: {e}")
+
+    await update.message.reply_text("✅ Спасибо, ваш хэш получен и отправлен на проверку. Ожидайте подтверждения.")
+
+    return ConversationHandler.END
 
 
 async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -582,8 +684,12 @@ async def handle_payment_confirmation(update: Update, context: ContextTypes.DEFA
         )
         logger.info(f"Sent payment received confirmation to user {user_id}.")
 
-        original_text = query.message.text
-        updated_text = original_text + "\n\n✅ Пользователю отправлено подтверждение получения средств."
+        session = user_sessions.get(user_id, {})
+        original_text = session.get('admin_text', query.message.text)
+        updated_text = original_text + \
+            f"\n\n✅3️⃣ Пользователю {user_id} отправлено подтверждение получения средств."
+        session['admin_text'] = updated_text
+
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Перевод клиенту сделан",
                                   callback_data=f"confirm_transfer_{user_id}")]
@@ -616,11 +722,11 @@ async def handle_transfer_confirmation(update: Update, context: ContextTypes.DEF
         )
         logger.info(f"Sent final transfer confirmation to user {user_id}.")
 
-        original_text = query.message.text
-        updated_text = original_text + "\n\n✅ Пользователю отправлено подтверждение осуществления перевода."
+        session = user_sessions.get(user_id, {})
+        original_text = session.get('admin_text', query.message.text)
+        updated_text = original_text + "\n\n✅4️⃣ Пользователю отправлено подтверждение осуществления перевода."
+        session['admin_text'] = updated_text
         await query.edit_message_text(updated_text)
-        if user_id in user_sessions:
-            user_sessions[user_id]['admin_text'] = updated_text
 
     except Exception as e:
         logger.error(
@@ -654,10 +760,11 @@ async def handle_user_confirm_transfer(update: Update, context: ContextTypes.DEF
 
         # Уведомляем админа
         if admin_message_id:
+            admin_text_before_final_confirm = session.get('admin_text', '')
             await context.bot.edit_message_text(
                 chat_id=admin_chat_id,
                 message_id=admin_message_id,
-                text=session.get('admin_text', '') + "\n\n✅🛑 Пользователь подтвердил перевод. 🛑✅ ",
+                text=admin_text_before_final_confirm + "\n\n✅🛑 Пользователь подтвердил перевод. 🛑✅ ",
                 parse_mode='Markdown'
             )
             logger.info(
@@ -666,6 +773,11 @@ async def handle_user_confirm_transfer(update: Update, context: ContextTypes.DEF
             logger.warning(
                 f"Could not find admin_message_id for user {user_id} to update with final confirmation.")
 
+        # Очищаем сессию после завершения сделки
+        if user_id in user_sessions:
+            del user_sessions[user_id]
+            logger.info(f"Session for user {user_id} has been cleared.")
+
     except Exception as e:
         logger.error(
             f"Error during user's final confirmation for user {user_id}: {e}", exc_info=True)
@@ -673,12 +785,14 @@ async def handle_user_confirm_transfer(update: Update, context: ContextTypes.DEF
 
 
 def main():
+    # Исправление: принудительно устанавливаем UTF-8 для вывода в консоль
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+
     logger.info("Starting the bot...")
 
     application = ApplicationBuilder().token(config['User']['TOKEN']).build()
-
-    # Рекомендуется также добавить логирование в admin_panel.py
-    # Например, передать logger в функции admin_panel или настроить его там.
 
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(handle_menu)],
@@ -712,7 +826,17 @@ def main():
                    CommandHandler('ac', admin_panel.admin_panel_close)]
     )
 
+    # Обработчик для получения хеша от пользователя (теперь работает для обоих сценариев)
+    hash_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(ask_for_hash, pattern=r'^user_confirms_sending_')],
+        states={
+            ENTERING_HASH: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_hash)],
+        },
+        fallbacks=[CommandHandler('start', start)],
+    )
+
     application.add_handler(admin_handler)
+    application.add_handler(hash_handler)  # Добавляем новый обработчик
     application.add_handler(CallbackQueryHandler(
         handle_payment_confirmation, pattern=r'^confirm_payment_'))
     application.add_handler(CallbackQueryHandler(
