@@ -794,17 +794,27 @@ async def handle_user_confirm_transfer(update: Update, context: ContextTypes.DEF
     user_id = int(data.split('_')[-1])
     logger.info(f"User {user_id} confirmed receiving the transfer.")
 
+    # ИЗМЕНЕНИЕ: Создаем клавиатуру с кнопкой "Назад в меню"
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Назад в меню", callback_data='back_to_menu')]
+    ])
+
     try:
         session = user_sessions.get(user_id)
         if not session:
             logger.warning(f"Could not find session for user {user_id} to confirm transfer.")
-            await query.edit_message_text(query.message.text + "\n\n✅ Подтверждение получено.")
+            await query.edit_message_text(
+                query.message.text + "\n\n✅ Подтверждение получено.",
+                reply_markup=keyboard
+            )
             return
 
         admin_message_ids = session.get('admin_message_ids', {})
         original_text = query.message.text
         updated_text = original_text + "\n\n✅ Спасибо! Подтверждение перевода получено."
-        await query.edit_message_text(updated_text)
+
+        # ИЗМЕНЕНИЕ: Добавляем клавиатуру к сообщению
+        await query.edit_message_text(updated_text, reply_markup=keyboard)
 
         if admin_message_ids:
             admin_text_before_final_confirm = session.get('admin_text', '')
@@ -833,7 +843,14 @@ async def handle_user_confirm_transfer(update: Update, context: ContextTypes.DEF
 
     except Exception as e:
         logger.error(f"Error handling user final transfer confirmation: {e}", exc_info=True)
-        pass
+        try:
+            # ИЗМЕНЕНИЕ: Добавляем клавиатуру даже в случае ошибки
+            await query.edit_message_text(
+                query.message.text + "\n\n✅ Подтверждение получено.",
+                reply_markup=keyboard
+            )
+        except Exception:
+            pass
 
 
 async def handle_decline_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
