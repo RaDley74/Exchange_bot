@@ -1,14 +1,14 @@
-import re
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import logging
+import configparser
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ConversationHandler, ContextTypes, filters
 )
-import configparser
-import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import re
+
 
 # --- Настройка логирования ---
-# Получаем тот же логгер, что и в основном файле, чтобы писать в тот же bot.log
 logger = logging.getLogger(__name__)
 
 # Читаем конфиг
@@ -27,17 +27,27 @@ config.read('settings.ini')
 ) = range(7)
 
 
+def get_admin_ids():
+    """Читает и возвращает список ID администраторов из файла конфигурации."""
+    admin_ids_str = config['User'].get('admin_chat_id', '')
+    if not admin_ids_str:
+        return []
+    # Разделяем строку по запятым и преобразуем каждый ID в число
+    return [int(admin_id.strip()) for admin_id in admin_ids_str.split(',')]
+
+
 async def admin_panel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     logger.info(f"User {user.id} ({user.username}) trying to access admin panel.")
 
-    admin_id = config['User'].getint('admin_chat_id', None)
+    admin_ids = get_admin_ids()
 
-    if admin_id is None:
+    if not admin_ids:
         logger.warning("Admin panel access denied: Bot not activated (no admin_chat_id).")
         await update.message.reply_text("❌ Бот не активирован.\n\n⚠️ Пропишите /start ▶️")
         return ConversationHandler.END
-    elif update.effective_user.id != admin_id:
+    # ИЗМЕНЕНИЕ: Проверяем, есть ли ID пользователя в списке админов
+    elif user.id not in admin_ids:
         logger.warning(f"User {user.id} ({user.username}) denied access to admin panel.")
         await update.message.reply_text("🚫 У вас нет доступа к админ-панели.")
         return ConversationHandler.END
@@ -69,7 +79,6 @@ async def admin_panel_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("⚙️ Настройки", callback_data='admin_settings'),
         ],
     ]
-    # Если это callback_query, используем edit_message_text, иначе reply_text
     if update.callback_query:
         await update.callback_query.edit_message_text(
             "⚙️ Админ-панель",
@@ -90,9 +99,10 @@ async def admin_panel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     user = query.from_user
     logger.info(f"Admin {user.id} ({user.username}) selected admin panel option: {data}")
 
-    admin_id = config['User'].getint('admin_chat_id', None)
+    admin_ids = get_admin_ids()
 
-    if user.id != admin_id:
+    # ИЗМЕНЕНИЕ: Проверяем, есть ли ID пользователя в списке админов
+    if user.id not in admin_ids:
         logger.warning(f"Non-admin user {user.id} tried to use admin panel via callback.")
         await query.message.reply_text("🚫 У вас нет доступа к админ-панели.")
         return ConversationHandler.END
@@ -102,10 +112,12 @@ async def admin_panel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         wallet = config['Settings'].get('wallet_address', '—')
         support = config['Settings'].get('support_contact', '—')
         masked_password = '*' * len(config['Settings'].get('admin_password', ''))
+        # ИЗМЕНЕНИЕ: Отображаем все ID админов
+        admin_ids_str = ', '.join(map(str, admin_ids))
 
         text = (
             "📊 <b>Информация о боте</b>\n\n"
-            f"👤 <b>Admin ID:</b> <code>{admin_id}</code>\n"
+            f"👤 <b>Admin IDs:</b> <code>{admin_ids_str}</code>\n"
             f"🔐 <b>Пароль:</b> <code>{masked_password}</code>\n"
             f"💱 <b>Курс:</b> <code>{exchange_rate}</code>\n"
             f"💼 <b>Кошелёк:</b> <code>{wallet}</code>\n"
@@ -116,7 +128,7 @@ async def admin_panel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             [InlineKeyboardButton("⬅️ Назад", callback_data='admin_back_menu')]
         ])
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
-        return ADMIN_MENU  # Остаемся в том же состоянии
+        return ADMIN_MENU
 
     elif data == 'admin_settings':
         keyboard = InlineKeyboardMarkup([
@@ -130,7 +142,6 @@ async def admin_panel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return SETTINGS_MENU
 
     elif data == 'admin_back_menu':
-        # await query.message.delete() # Удаление может вызвать ошибку, если сообщение уже было изменено
         return await admin_panel_menu(update, context)
 
     elif data == 'admin_set_password':
@@ -214,9 +225,10 @@ async def set_support_contact(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def admin_panel_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    admin_id = config['User'].getint('admin_chat_id', None)
+    admin_ids = get_admin_ids()
 
-    if user.id != admin_id:
+    # ИЗМЕНЕНИЕ: Проверяем, есть ли ID пользователя в списке админов
+    if user.id not in admin_ids:
         logger.warning(f"Non-admin user {user.id} tried to close admin panel.")
         await update.message.reply_text("🚫 У вас нет доступа к этой команде.")
         return ConversationHandler.END
