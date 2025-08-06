@@ -138,7 +138,7 @@ async def choosing_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['currency'] = 'USDT'
         logger.info(
             f"User {user.id} ({user.username}) chose currency: {context.user_data['currency']}")
-        await query.message.chat.send_message(f"💰 Введите сумму для обмена (в {context.user_data['currency']}):")
+        await query.edit_message_text(f"💰 Введите сумму для обмена (в {context.user_data['currency']}):")
         return ENTERING_AMOUNT
 
     elif data == 'back_to_menu':
@@ -247,7 +247,7 @@ async def entering_inn_details(update: Update, context: ContextTypes.DEFAULT_TYP
     logger.info(f"User {user.id} ({user.username}) entered INN.")
 
     await update.message.reply_text(
-        f"Вы указали ИНН: {inn}\n\n"
+        f"📄 Вы указали ИНН: {inn}\n\n"
     )
 
     amount = context.user_data['amount']
@@ -316,7 +316,7 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
                                   callback_data=f"user_confirms_sending_{user.id}")]
         ])
 
-        await query.message.chat.send_message(
+        await query.edit_message_text(
             f"🙏 Спасибо за заявку!\n\n"
             f"💵 Сумма: {amount} {currency} → {sum_uah:.2f} UAH\n\n"
             f"🏦 Переведите средства на адрес:\n"
