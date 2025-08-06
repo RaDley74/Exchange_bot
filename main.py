@@ -82,11 +82,8 @@ def get_admin_ids():
     return [int(admin_id.strip()) for admin_id in admin_ids_str.split(',')]
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    logger.info(f"User {user.id} ({user.username}) started the bot.")
-    config.read(config_file_name, encoding='utf-8')
-
+async def display_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет или редактирует сообщение, чтобы показать главное меню."""
     keyboard = [
         [
             InlineKeyboardButton("➸ Обменять", callback_data='exchange'),
@@ -100,10 +97,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🌟 Выбери раздел:"
     )
 
-    if update.message:
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-    elif update.callback_query:
+    # Если это ответ на callback, редактируем сообщение. Иначе - отправляем новое.
+    if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    elif update.message:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает команду /start, когда нет активного диалога."""
+    user = update.effective_user
+    logger.info(f"User {user.id} ({user.username}) started the bot.")
+    await display_main_menu(update, context)
+
+
+async def cancel_and_restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Завершает текущий диалог и показывает главное меню."""
+    user = update.effective_user
+    logger.info(f"User {user.id} ({user.username}) used /start to cancel/restart a conversation.")
+    await display_main_menu(update, context)
+    return ConversationHandler.END
 
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,7 +152,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     elif data == 'back_to_menu':
-        await start(update, context)
+        await display_main_menu(update, context)
         return ConversationHandler.END
 
     return ConversationHandler.END
@@ -161,7 +174,7 @@ async def choosing_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'back_to_menu':
         logger.info(
             f"User {user.id} ({user.username}) returned to the main menu from currency selection.")
-        await start(update, context)
+        await display_main_menu(update, context)
         return ConversationHandler.END
 
     return ConversationHandler.END
@@ -355,7 +368,6 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"{transfer_info}"
         )
 
-        # Добавлена кнопка "Отказать" для начальной заявки
         admin_keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("❌ Отказать",
                                  callback_data=f"decline_request_{user.id}")
@@ -396,13 +408,13 @@ async def confirming_exchange(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     elif data == 'back_to_menu':
         logger.info(f"User {user.id} cancelled the exchange.")
-        await start(update, context)
+        await display_main_menu(update, context)
         return ConversationHandler.END
 
     else:
         logger.warning(f"User {user.id} triggered an unknown callback: {data}")
         await query.message.reply_text("Неизвестная команда. Возвращаю в меню.")
-        await start(update, context)
+        await display_main_menu(update, context)
         return ConversationHandler.END
 
 
@@ -424,7 +436,7 @@ async def confirming_exchange_trx(update: Update, context: ContextTypes.DEFAULT_
     elif data == 'back_to_menu':
         logger.info(
             f"User {user.id} ({user.username}) declined TRX commission and returned to menu.")
-        await start(update, context)
+        await display_main_menu(update, context)
         return ConversationHandler.END
 
 
@@ -554,14 +566,14 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
         return ConversationHandler.END
     elif data == 'back_to_menu':
         logger.info(f"User {user.id} cancelled the TRX exchange.")
-        await start(update, context)
+        await display_main_menu(update, context)
         return ConversationHandler.END
 
     else:
         logger.warning(
             f"User {user.id} triggered an unknown callback in final TRX confirmation: {data}")
         await query.message.reply_text("Неизвестная команда. Возвращаю в меню.")
-        await start(update, context)
+        await display_main_menu(update, context)
         return ConversationHandler.END
 
 
@@ -794,7 +806,6 @@ async def handle_user_confirm_transfer(update: Update, context: ContextTypes.DEF
     user_id = int(data.split('_')[-1])
     logger.info(f"User {user_id} confirmed receiving the transfer.")
 
-    # ИЗМЕНЕНИЕ: Создаем клавиатуру с кнопкой "Назад в меню"
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("⬅️ Назад в меню", callback_data='back_to_menu')]
     ])
@@ -813,7 +824,6 @@ async def handle_user_confirm_transfer(update: Update, context: ContextTypes.DEF
         original_text = query.message.text
         updated_text = original_text + "\n\n✅ Спасибо! Подтверждение перевода получено."
 
-        # ИЗМЕНЕНИЕ: Добавляем клавиатуру к сообщению
         await query.edit_message_text(updated_text, reply_markup=keyboard)
 
         if admin_message_ids:
@@ -844,7 +854,6 @@ async def handle_user_confirm_transfer(update: Update, context: ContextTypes.DEF
     except Exception as e:
         logger.error(f"Error handling user final transfer confirmation: {e}", exc_info=True)
         try:
-            # ИЗМЕНЕНИЕ: Добавляем клавиатуру даже в случае ошибки
             await query.edit_message_text(
                 query.message.text + "\n\n✅ Подтверждение получено.",
                 reply_markup=keyboard
@@ -918,8 +927,10 @@ def main():
 
     application = ApplicationBuilder().token(config['User']['TOKEN']).build()
 
+    # ИЗМЕНЕНИЕ: Используем `cancel_and_restart` в fallbacks
     conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(handle_menu)],
+        entry_points=[CallbackQueryHandler(
+            handle_menu, pattern='^(exchange|rate|user_help|back_to_menu)$')],
         states={
             CHOOSING_CURRENCY: [CallbackQueryHandler(choosing_currency)],
             ENTERING_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, entering_amount)],
@@ -932,7 +943,7 @@ def main():
             ENTERING_TRX_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, entering_trx_address)],
             FINAL_CONFIRMING_EXCHANGE_TRX: [CallbackQueryHandler(final_confirming_exchange_trx)],
         },
-        fallbacks=[CommandHandler('start', start)],
+        fallbacks=[CommandHandler('start', cancel_and_restart)],
     )
 
     admin_handler = ConversationHandler(
@@ -950,16 +961,20 @@ def main():
                    CommandHandler('ac', admin_panel.admin_panel_close)]
     )
 
+    # ИЗМЕНЕНИЕ: Используем `cancel_and_restart` в fallbacks
     hash_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(ask_for_hash, pattern=r'^user_confirms_sending_')],
         states={
             ENTERING_HASH: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_hash)],
         },
-        fallbacks=[CommandHandler('start', start)],
+        fallbacks=[CommandHandler('start', cancel_and_restart)],
     )
 
     application.add_handler(admin_handler)
     application.add_handler(hash_handler)
+    application.add_handler(conv_handler)
+
+    # Отдельные обработчики для кнопок, которые не являются частью диалога
     application.add_handler(CallbackQueryHandler(
         handle_decline_request, pattern=r'^decline_request_'))
     application.add_handler(CallbackQueryHandler(
@@ -970,9 +985,10 @@ def main():
         handle_transfer_confirmation_trx, pattern=r'^confirm_trx_transfer_'))
     application.add_handler(CallbackQueryHandler(
         handle_user_confirm_transfer, pattern=r'^user_confirm_transfer_'))
+
+    # ИЗМЕНЕНИЕ: Этот обработчик для /start будет работать, только если не активен никакой диалог
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('a', admin_panel.admin_panel_start))
-    application.add_handler(conv_handler)
 
     logger.info("Bot started successfully! Polling for updates...")
     application.run_polling()
