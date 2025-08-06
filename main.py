@@ -2,8 +2,6 @@ import sys
 import logging
 import warnings
 import admin_panel
-import os
-import configparser
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -13,8 +11,10 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot, MenuButtonCommands
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 
+# Импортируем все необходимое из нашего нового менеджера конфигураций
+from config_manager import config, load_config, get_admin_ids
 
 # --- Настройка логирования ---
 logging.basicConfig(
@@ -30,6 +30,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
+# Состояния диалога
 (
     CHOOSING_CURRENCY,
     ENTERING_AMOUNT,
@@ -44,42 +45,10 @@ warnings.filterwarnings("ignore", category=UserWarning)
     ENTERING_HASH,
 ) = range(11)
 
-config_file_name = 'settings.ini'
-config = configparser.ConfigParser()
 user_sessions = {}
 
-if not os.path.exists(config_file_name):
-    logger.warning(f"Configuration file '{config_file_name}' not found. Creating a new one.")
-    config['User'] = {
-        'TOKEN': 'your_token_here',
-        'ADMIN_CHAT_ID': 'your_admin_chat_id_here',
-    }
-    config['Settings'] = {
-        'EXCHANGE_RATE': '41.2',
-        'ADMIN_PASSWORD': 'your_admin_password_here',
-        'WALLET_ADDRESS': 'your_wallet_address_here',
-        'SUPPORT_CONTACT': 'your_support_contact_here'
-    }
-
-    with open(config_file_name, 'w', encoding='utf-8') as config_file:
-        config.write(config_file)
-
-    logger.info(f"Configuration file '{config_file_name}' created. Please edit it and restart.")
-    print(
-        f"Configuration file '{config_file_name}' created. Please edit it with your token and admin chat ID, then restart the script.")
-    input("Press Enter to exit...")
-    exit(0)
-else:
-    config.read(config_file_name, encoding='utf-8')
-    logger.info(f"Configuration file '{config_file_name}' loaded successfully.")
-
-
-def get_admin_ids():
-    """Читает и возвращает список ID администраторов из файла конфигурации."""
-    admin_ids_str = config['User'].get('admin_chat_id', '')
-    if not admin_ids_str:
-        return []
-    return [int(admin_id.strip()) for admin_id in admin_ids_str.split(',')]
+# Загружаем конфигурацию один раз при запуске
+load_config()
 
 
 async def display_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -97,7 +66,6 @@ async def display_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🌟 Выбери раздел:"
     )
 
-    # Если это ответ на callback, редактируем сообщение. Иначе - отправляем новое.
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     elif update.message:
@@ -125,8 +93,6 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user = query.from_user
     logger.info(f"User {user.id} ({user.username}) selected menu option: {data}")
-
-    config.read(config_file_name, encoding='utf-8')
 
     if data == 'rate':
         keyboard = [
@@ -156,6 +122,10 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     return ConversationHandler.END
+
+# ... (остальной код файла main.py остается без изменений, так как он уже не содержит блокирующих вызовов)
+# Убедитесь, что вы удалили старую функцию get_admin_ids и определение config из этого файла,
+# так как мы теперь импортируем их из config_manager.
 
 
 async def choosing_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -871,7 +841,6 @@ async def handle_decline_request(update: Update, context: ContextTypes.DEFAULT_T
     admin_user = query.from_user
     logger.info(f"Admin {admin_user.id} declined the request for user {user_id}.")
 
-    config.read(config_file_name, encoding='utf-8')
     support_contact = config['Settings'].get('support_contact', 'администратора')
 
     try:
@@ -927,7 +896,6 @@ def main():
 
     application = ApplicationBuilder().token(config['User']['TOKEN']).build()
 
-    # ИЗМЕНЕНИЕ: Используем `cancel_and_restart` в fallbacks
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(
             handle_menu, pattern='^(exchange|rate|user_help|back_to_menu)$')],
@@ -961,7 +929,6 @@ def main():
                    CommandHandler('ac', admin_panel.admin_panel_close)]
     )
 
-    # ИЗМЕНЕНИЕ: Используем `cancel_and_restart` в fallbacks
     hash_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(ask_for_hash, pattern=r'^user_confirms_sending_')],
         states={
@@ -974,7 +941,6 @@ def main():
     application.add_handler(hash_handler)
     application.add_handler(conv_handler)
 
-    # Отдельные обработчики для кнопок, которые не являются частью диалога
     application.add_handler(CallbackQueryHandler(
         handle_decline_request, pattern=r'^decline_request_'))
     application.add_handler(CallbackQueryHandler(
@@ -986,7 +952,6 @@ def main():
     application.add_handler(CallbackQueryHandler(
         handle_user_confirm_transfer, pattern=r'^user_confirm_transfer_'))
 
-    # ИЗМЕНЕНИЕ: Этот обработчик для /start будет работать, только если не активен никакой диалог
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('a', admin_panel.admin_panel_start))
 

@@ -1,19 +1,15 @@
 import logging
-import configparser
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ConversationHandler, ContextTypes, filters
+    ConversationHandler, ContextTypes
 )
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 import re
 
+# Импортируем общие объекты и функции из config_manager
+from config_manager import config, save_config, get_admin_ids
 
 # --- Настройка логирования ---
 logger = logging.getLogger(__name__)
-
-# Читаем конфиг
-config = configparser.ConfigParser()
-config.read('settings.ini')
 
 # Этапы разговора
 (
@@ -26,16 +22,6 @@ config.read('settings.ini')
     SET_SUPPORT
 ) = range(7)
 
-
-def get_admin_ids():
-    """Читает и возвращает список ID администраторов из файла конфигурации."""
-    admin_ids_str = config['User'].get('admin_chat_id', '')
-    if not admin_ids_str:
-        return []
-    # Разделяем строку по запятым и преобразуем каждый ID в число
-    return [int(admin_id.strip()) for admin_id in admin_ids_str.split(',')]
-
-
 async def admin_panel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     logger.info(f"User {user.id} ({user.username}) trying to access admin panel.")
@@ -46,8 +32,8 @@ async def admin_panel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning("Admin panel access denied: Bot not activated (no admin_chat_id).")
         await update.message.reply_text("❌ Бот не активирован.\n\n⚠️ Пропишите /start ▶️")
         return ConversationHandler.END
-    # ИЗМЕНЕНИЕ: Проверяем, есть ли ID пользователя в списке админов
-    elif user.id not in admin_ids:
+
+    if user.id not in admin_ids:
         logger.warning(f"User {user.id} ({user.username}) denied access to admin panel.")
         await update.message.reply_text("🚫 У вас нет доступа к админ-панели.")
         return ConversationHandler.END
@@ -101,7 +87,6 @@ async def admin_panel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     admin_ids = get_admin_ids()
 
-    # ИЗМЕНЕНИЕ: Проверяем, есть ли ID пользователя в списке админов
     if user.id not in admin_ids:
         logger.warning(f"Non-admin user {user.id} tried to use admin panel via callback.")
         await query.message.reply_text("🚫 У вас нет доступа к админ-панели.")
@@ -112,7 +97,6 @@ async def admin_panel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         wallet = config['Settings'].get('wallet_address', '—')
         support = config['Settings'].get('support_contact', '—')
         masked_password = '*' * len(config['Settings'].get('admin_password', ''))
-        # ИЗМЕНЕНИЕ: Отображаем все ID админов
         admin_ids_str = ', '.join(map(str, admin_ids))
 
         text = (
@@ -173,8 +157,7 @@ async def set_new_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_password = update.message.text.strip()
     user = update.effective_user
     config['Settings']['admin_password'] = new_password
-    with open('settings.ini', 'w') as config_file:
-        config.write(config_file)
+    await save_config()  # Асинхронное сохранение
     logger.info(f"Admin {user.id} updated the password.")
     await update.message.reply_text("✅ Пароль обновлён.")
     return await admin_panel_menu(update, context)
@@ -186,8 +169,7 @@ async def set_exchange_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         float(new_rate)
         config['Settings']['exchange_rate'] = new_rate
-        with open('settings.ini', 'w') as config_file:
-            config.write(config_file)
+        await save_config()  # Асинхронное сохранение
         logger.info(f"Admin {user.id} updated exchange rate to: {new_rate}")
         await update.message.reply_text("✅ Курс обновлён.")
     except ValueError:
@@ -200,8 +182,7 @@ async def set_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_wallet = update.message.text.strip()
     user = update.effective_user
     config['Settings']['wallet_address'] = new_wallet
-    with open('settings.ini', 'w') as config_file:
-        config.write(config_file)
+    await save_config()  # Асинхронное сохранение
     logger.info(f"Admin {user.id} updated wallet address.")
     await update.message.reply_text("✅ Кошелёк обновлён.")
     return await admin_panel_menu(update, context)
@@ -216,8 +197,7 @@ async def set_support_contact(update: Update, context: ContextTypes.DEFAULT_TYPE
         return SET_SUPPORT
     else:
         config['Settings']['support_contact'] = new_support
-        with open('settings.ini', 'w') as config_file:
-            config.write(config_file)
+        await save_config()  # Асинхронное сохранение
         logger.info(f"Admin {user.id} updated support contact.")
         await update.message.reply_text("✅ Контакт поддержки обновлён.")
     return await admin_panel_menu(update, context)
@@ -227,7 +207,6 @@ async def admin_panel_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     admin_ids = get_admin_ids()
 
-    # ИЗМЕНЕНИЕ: Проверяем, есть ли ID пользователя в списке админов
     if user.id not in admin_ids:
         logger.warning(f"Non-admin user {user.id} tried to close admin panel.")
         await update.message.reply_text("🚫 У вас нет доступа к этой команде.")
