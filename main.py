@@ -9,6 +9,8 @@ from telegram.ext import ApplicationBuilder
 
 # Import our new classes
 from config_manager import ConfigManager
+# --- Import the new DatabaseManager ---
+from database_manager import DatabaseManager
 from handlers.admin_handler import AdminPanelHandler
 from handlers.exchange_handler import ExchangeHandler
 
@@ -42,14 +44,17 @@ class Bot:
         self.config = ConfigManager()
         self.config.load()
 
-        # 2. Initialize the session storage
-        self.user_sessions = {}
+        # 2. --- Initialize the Database ---
+        # Instead of an in-memory dictionary, we now use our persistent database.
+        self.db = DatabaseManager()
+        self.db.connect()
+        self.db.setup_database()  # Creates tables if they don't exist
 
         # 3. Create the PTB application
         self.application = ApplicationBuilder().token(self.config.token).build()
 
         # 4. Create instances of our handlers, passing them `self` (the Bot instance)
-        #    to provide access to config and user_sessions.
+        #    to provide access to config and now the database.
         self.admin_handler = AdminPanelHandler(self)
         self.exchange_handler = ExchangeHandler(self)
 
@@ -65,9 +70,13 @@ class Bot:
         """
         Starts the bot.
         """
-        self.setup_handlers()
-        logger.info("Bot is running and ready to work...")
-        self.application.run_polling()
+        try:
+            self.setup_handlers()
+            logger.info("Bot is running and ready to work...")
+            self.application.run_polling()
+        finally:
+            # --- Ensure the database connection is closed gracefully ---
+            self.db.close()
 
 
 if __name__ == "__main__":

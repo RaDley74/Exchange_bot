@@ -22,8 +22,9 @@ class AdminPanelHandler:
         SET_NEW_PASSWORD,
         SET_EXCHANGE_RATE,
         SET_WALLET,
-        SET_SUPPORT
-    ) = range(7)
+        SET_SUPPORT,
+        AWAIT_USER_FOR_APPS,  # Новое состояние для ожидания ввода пользователя
+    ) = range(8)
 
     def __init__(self, bot_instance):
         """
@@ -66,6 +67,9 @@ class AdminPanelHandler:
                 InlineKeyboardButton("📊 Информация", callback_data='admin_info'),
                 InlineKeyboardButton("⚙️ Настройки", callback_data='admin_settings'),
             ],
+            [
+                InlineKeyboardButton("🔍 Найти заявки", callback_data='find_user_applications'),
+            ],
         ]
         text = "⚙️ Админ-панель"
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -106,6 +110,9 @@ class AdminPanelHandler:
         elif data == 'admin_set_support':
             await query.edit_message_text("📞 Введите новый контакт поддержки:")
             return self.SET_SUPPORT
+        elif data == 'find_user_applications':
+            await query.edit_message_text("Введите ID аккаунта или login телеграм для поиска активных заявок:")
+            return self.AWAIT_USER_FOR_APPS
 
         return self.ADMIN_MENU
 
@@ -135,6 +142,78 @@ class AdminPanelHandler:
         ])
         await query.edit_message_text("⚙️ Настройки:", reply_markup=keyboard)
         return self.SETTINGS_MENU
+
+    async def show_user_applications(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_input = update.message.text.strip().lower()
+        admin_user = update.effective_user
+        logger.info(f"Admin {admin_user.id} is searching for applications of user: {user_input}")
+
+        # --- Начало симуляции данных ---
+        # В реальном приложении здесь будет запрос к вашей базе данных
+        # Пример: applications = await db.get_active_applications_by_user(user_input)
+        mock_data_string = "1,349988626,radley74,awaiting_confirmation,USDT,123.0,3813.0,123,123,123,123,,0,123,{},2025-08-07 10:12:24,2025-08-07 10:12:45"
+
+        # Предполагаем, что у пользователя может быть несколько заявок
+        all_applications_mock = [self._parse_application_data(mock_data_string)]
+
+        found_apps = [
+            app for app in all_applications_mock
+            if user_input == str(app['user_id']) or user_input == app['username'].lower()
+        ]
+        # --- Конец симуляции данных ---
+
+        if found_apps:
+            await update.message.reply_text(f"✅ Найдены активные заявки ({len(found_apps)} шт.):")
+            for app in found_apps:
+                response_text = self._format_application_info(app)
+                await update.message.reply_text(response_text, parse_mode='HTML')
+        else:
+            await update.message.reply_text("❌ Активных заявок для данного пользователя не найдено.")
+
+        return await self._show_main_menu(update)
+
+    def _parse_application_data(self, data_string: str) -> dict:
+        """Парсит строку с данными о заявке в словарь."""
+        parts = data_string.split(',')
+        return {
+            'id': parts[0],
+            'user_id': int(parts[1]),
+            'username': parts[2],
+            'status': parts[3],
+            'currency': parts[4],
+            'amount_currency': float(parts[5]),
+            'amount_uah': float(parts[6]),
+            'bank_name': parts[7],
+            'card_info': parts[8],
+            'fio': parts[9],
+            'inn': parts[10],
+            'trx_address': parts[11],
+            'needs_trx': parts[12],
+            'transaction_hash': parts[13],
+            'admin_message_ids': parts[14],
+            'created_at': parts[15],
+            'updated_at': parts[16]
+        }
+
+    def _format_application_info(self, app: dict) -> str:
+        """Форматирует информацию о заявке для вывода."""
+        return (
+            f"<b>Заявка ID:</b> <code>{app['id']}</code>\n"
+            f"<b>Пользователь:</b> @{app['username']} (<code>{app['user_id']}</code>)\n"
+            f"<b>Статус:</b> {app['status']}\n"
+            f"<b>Валюта:</b> {app['currency']}\n"
+            f"<b>Сумма (валюта):</b> {app['amount_currency']}\n"
+            f"<b>Сумма (UAH):</b> {app['amount_uah']}\n"
+            f"<b>Банк:</b> {app['bank_name']}\n"
+            f"<b>Карта:</b> <code>{app['card_info']}</code>\n"
+            f"<b>ФИО:</b> {app['fio']}\n"
+            f"<b>ИНН:</b> <code>{app['inn']}</code>\n"
+            f"<b>TRX адрес:</b> <code>{app['trx_address'] or 'Не указан'}</code>\n"
+            f"<b>Нужен TRX?:</b> {'Да' if app['needs_trx'] == '1' else 'Нет'}\n"
+            f"<b>Хеш транзакции:</b> <code>{app['transaction_hash'] or 'Нет'}</code>\n"
+            f"<b>Создана:</b> {app['created_at']}\n"
+            f"<b>Обновлена:</b> {app['updated_at']}"
+        )
 
     async def set_new_password(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.bot.config.admin_password = update.message.text.strip()
@@ -187,12 +266,13 @@ class AdminPanelHandler:
             entry_points=[CommandHandler('a', self.start)],
             states={
                 self.ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.check_password)],
-                self.ADMIN_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_')],
+                self.ADMIN_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_|find_user_applications')],
                 self.SETTINGS_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_')],
                 self.SET_NEW_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_new_password)],
                 self.SET_EXCHANGE_RATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_exchange_rate)],
                 self.SET_WALLET: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_wallet)],
                 self.SET_SUPPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_support_contact)],
+                self.AWAIT_USER_FOR_APPS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.show_user_applications)],
             },
             fallbacks=[CommandHandler('a', self.start), CommandHandler('ac', self.close)]
         )

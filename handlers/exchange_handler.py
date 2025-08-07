@@ -1,6 +1,7 @@
 # handlers/exchange_handler.py
 
 import logging
+import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ConversationHandler, ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
@@ -27,11 +28,11 @@ class ExchangeHandler:
     def __init__(self, bot_instance):
         """
         The constructor receives the main Bot instance to access
-        shared resources like configuration and sessions.
+        shared resources like configuration and the database.
         """
         self.bot = bot_instance
 
-    # --- Main Menu and its handling ---
+    # --- Main Menu and its handling (no changes here) ---
 
     async def main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Sends or edits a message to show the main menu."""
@@ -56,8 +57,19 @@ class ExchangeHandler:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handles the /start command when there is no active conversation."""
         user = update.effective_user
+
+        check_request = self.check_if_request_exists(update, context)
+        if check_request:
+            logger.info(f"User {user.id} ({user.username}) has already an active request.")
+            await update.message.reply_text(f"🚫 У вас уже есть активная заявка. \n\n 🛠️Если столкнулись с проблемой, напишите: @{self.bot.config.support_contact}")
+            return
         logger.info(f"User {user.id} ({user.username}) started the bot.")
         await self.main_menu(update, context)
+
+    def check_if_request_exists(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        check_request = self.bot.db.get_request_by_user_id(user.id)
+        return check_request if check_request is not None else None
 
     async def cancel_and_restart(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Ends the current conversation and shows the main menu."""
@@ -102,7 +114,7 @@ class ExchangeHandler:
 
         return ConversationHandler.END
 
-    # --- ConversationHandler methods for the exchange process ---
+    # --- ConversationHandler methods for the exchange process (All methods from here are changed) ---
 
     async def choosing_currency(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -206,13 +218,24 @@ class ExchangeHandler:
         )
         return self.CONFIRMING_EXCHANGE
 
+    # --- The logic below is now heavily reliant on the database ---
+
     async def confirming_exchange(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
         data = query.data
 
         if data == 'send_exchange':
-            return await self._process_standard_exchange(query, context)
+            # Create the request in the database and get its ID
+            request_id = self.bot.db.create_exchange_request(query.from_user, context.user_data)
+            if not request_id:
+                await query.edit_message_text("❌ Произошла ошибка при создании заявки. Попробуйте снова.")
+                return ConversationHandler.END
+
+            # Now we pass the request_id to all related functions
+            await self._process_standard_exchange(query, context, request_id)
+            return ConversationHandler.END
+
         elif data == 'send_exchange_trx':
             keyboard = [
                 [InlineKeyboardButton("✅ Согласен", callback_data='send_transfer_trx')],
@@ -229,29 +252,30 @@ class ExchangeHandler:
             return ConversationHandler.END
         return ConversationHandler.END
 
-    async def _process_standard_exchange(self, query: Update.callback_query, context: ContextTypes.DEFAULT_TYPE):
+    async def _process_standard_exchange(self, query: Update.callback_query, context: ContextTypes.DEFAULT_TYPE, request_id: int):
         user = query.from_user
-        logger.info(f"Creating a standard exchange request for user {user.id}.")
-
-        self.bot.user_sessions[user.id] = context.user_data.copy()
+        request_data = self.bot.db.get_request_by_id(request_id)
+        logger.info(f"Creating a standard exchange request ({request_id}) for user {user.id}.")
 
         user_keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Я совершил(а) перевод",
-                                 callback_data=f"user_confirms_sending_{user.id}")
+                                 callback_data=f"user_confirms_sending_{request_id}")
         ]])
 
+        # The wallet address is placed in a code block (`...`), which prevents
+        # markdown parsing inside it. No manual escaping is needed here.
+        wallet_address = self.bot.config.wallet_address
+
         await query.edit_message_text(
-            f"🙏 Спасибо за заявку!\n\n"
-            f"💵 Сумма: {context.user_data['amount']} {context.user_data['currency']} → {context.user_data['sum_uah']:.2f} UAH\n\n"
-            f"🏦 Переведите средства на адрес:\n`{self.bot.config.wallet_address}`\n\n"
+            f"🙏 Спасибо за заявку #{request_id}!\n\n"
+            f"💵 Сумма: {request_data['amount_currency']} {request_data['currency']} → {request_data['amount_uah']:.2f} UAH\n\n"
+            f"🏦 Переведите средства на адрес:\n`{wallet_address}`\n\n"
             "После перевода нажмите кнопку ниже для предоставления хэша.",
             parse_mode='Markdown', reply_markup=user_keyboard
         )
 
-        text_for_admin, admin_keyboard = self._prepare_admin_notification(user, context.user_data)
-        await self._send_admin_notification(user.id, text_for_admin, admin_keyboard)
-
-        return ConversationHandler.END
+        self.bot.db.update_request_status(request_id, 'awaiting payment')
+        await self._send_admin_notification(request_id)
 
     async def confirming_exchange_trx(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -295,20 +319,21 @@ class ExchangeHandler:
     async def final_confirming_exchange_trx(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
-        user = query.from_user
 
         if query.data == 'send_exchange_with_trx':
-            self.bot.user_sessions[user.id] = context.user_data.copy()
+            request_id = self.bot.db.create_exchange_request(query.from_user, context.user_data)
+            if not request_id:
+                await query.edit_message_text("❌ Произошла ошибка при создании заявки. Попробуйте снова.")
+                return ConversationHandler.END
 
             await query.message.chat.send_message(
-                "🙏 Спасибо за заявку!\n\n"
+                f"🙏 Спасибо за заявку #{request_id}!\n\n"
                 "🏦 Ожидайте сообщения от бота об успешном переводе TRX ✅",
                 parse_mode='Markdown'
             )
 
-            text_for_admin, admin_keyboard = self._prepare_admin_notification(
-                user, context.user_data, needs_trx=True)
-            await self._send_admin_notification(user.id, text_for_admin, admin_keyboard)
+            self.bot.db.update_request_status(request_id, 'awaiting trx transfer')
+            await self._send_admin_notification(request_id)
 
             return ConversationHandler.END
         elif query.data == 'back_to_menu':
@@ -319,202 +344,248 @@ class ExchangeHandler:
     async def ask_for_hash(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
-        user_id = int(query.data.split('_')[-1])
-        context.user_data['session_user_id'] = user_id
+        request_id = int(query.data.split('_')[-1])
+        context.user_data['request_id'] = request_id
         await query.edit_message_text(text="✍️ Пожалуйста, отправьте хэш вашей транзакции:")
         return self.ENTERING_HASH
 
     async def process_hash(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         submitted_hash = update.message.text
-        session_user_id = context.user_data.get('session_user_id')
+        request_id = context.user_data.get('request_id')
 
-        session = self.bot.user_sessions.get(session_user_id)
-        if not session:
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
             await update.message.reply_text("Произошла ошибка сессии. Начните сначала: /start")
             return ConversationHandler.END
 
-        base_admin_text = session.get('admin_text_after_trx') or session.get('admin_text')
+        # Update hash in DB
+        self.bot.db.update_request_data(request_id, {'transaction_hash': submitted_hash})
+        self.bot.db.update_request_status(request_id, 'awaiting confirmation')
+
+        # Re-fetch data to get the latest state
+        request_data = self.bot.db.get_request_by_id(request_id)
+
+        base_admin_text, _ = self._prepare_admin_notification(request_data)
         final_admin_text = base_admin_text + \
             f"\n\n✅2️⃣ Пользователь подтвердил перевод. Hash: `{submitted_hash}`"
-        session['admin_text'] = final_admin_text
 
         admin_keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Средства получены",
-                                 callback_data=f"confirm_payment_{session_user_id}"),
-            InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{session_user_id}")
+                                 callback_data=f"confirm_payment_{request_id}"),
+            InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
         ]])
 
-        await self._update_admin_messages(session, final_admin_text, admin_keyboard)
+        await self._update_admin_messages(request_id, final_admin_text, admin_keyboard)
         await update.message.reply_text("✅ Спасибо, ваш хэш получен и отправлен на проверку.")
         return ConversationHandler.END
 
-    # --- Admin Callback Handlers ---
+    # --- Admin Callback Handlers (all updated to use request_id) ---
 
     async def handle_transfer_confirmation_trx(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
-        user_id = int(query.data.split('_')[-1])
-        session = self.bot.user_sessions.get(user_id)
-        if not session:
+        request_id = int(query.data.split('_')[-1])
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            await query.answer("Заявка не найдена!", show_alert=True)
             return
 
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Я совершил(а) перевод",
-                                 callback_data=f"user_confirms_sending_{user_id}")
+                                 callback_data=f"user_confirms_sending_{request_id}")
         ]])
         await context.bot.send_message(
-            chat_id=user_id,
-            text=(f"✅ Перевод TRX выполнен.\n\n"
-                  f"📥 Переведите {(session['amount'] - 15):.2f} {session['currency']} на кошелек:\n"
+            chat_id=request_data['user_id'],
+            text=(f"✅ Перевод TRX выполнен для заявки #{request_id}.\n\n"
+                  f"📥 Переведите {(request_data['amount_currency'] - 15):.2f} {request_data['currency']} на кошелек:\n"
                   f"`{self.bot.config.wallet_address}`\n\n"
                   "После перевода нажмите кнопку ниже."),
             reply_markup=keyboard, parse_mode='Markdown'
         )
 
+        self.bot.db.update_request_status(request_id, 'awaiting payment')
+
+        updated_text, _ = self._prepare_admin_notification(request_data)
+        updated_text += "\n\n✅1️⃣ Уведомление о переводе TRX отправлено"
+
         keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{user_id}")
+            InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
         ]])
-        updated_text = session.get('admin_text', '') + \
-            "\n\n✅1️⃣ Уведомление о переводе TRX отправлено"
-        session['admin_text_after_trx'] = updated_text
-        await self._update_admin_messages(session, updated_text, keyboard)
+        await self._update_admin_messages(request_id, updated_text, keyboard)
 
     async def handle_payment_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
-        user_id = int(query.data.split('_')[-1])
-        await context.bot.send_message(chat_id=user_id, text="✅ Средства получены.\n\n⏳ Ожидайте перевода.")
+        request_id = int(query.data.split('_')[-1])
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            return
 
-        session = self.bot.user_sessions.get(user_id, {})
-        updated_text = session.get('admin_text', '') + \
-            f"\n\n✅3️⃣ Уведомление о получении средств отправлено."
-        session['admin_text'] = updated_text
+        await context.bot.send_message(chat_id=request_data['user_id'], text=f"✅ Средства по заявке #{request_id} получены.\n\n⏳ Ожидайте перевода.")
+
+        self.bot.db.update_request_status(request_id, 'payment received')
+
+        updated_text, _ = self._prepare_admin_notification(
+            self.bot.db.get_request_by_id(request_id))
+        updated_text += f"\n\n✅ Хэш: `{request_data['transaction_hash']}`"
+        updated_text += f"\n\n✅3️⃣ Уведомление о получении средств отправлено."
+
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Перевод клиенту сделан",
-                                 callback_data=f"confirm_transfer_{user_id}"),
-            InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{user_id}")
+                                 callback_data=f"confirm_transfer_{request_id}"),
+            InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
         ]])
-        await self._update_admin_messages(session, updated_text, keyboard)
+        await self._update_admin_messages(request_id, updated_text, keyboard)
 
     async def handle_transfer_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
-        user_id = int(query.data.split('_')[-1])
+        request_id = int(query.data.split('_')[-1])
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            return
+
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Подтвердить получение средств",
-                                  callback_data=f"by_user_confirm_transfer_{user_id}")]
+                                  callback_data=f"by_user_confirm_transfer_{request_id}")]
         ])
         await context.bot.send_message(
-            chat_id=user_id,
-            text="✅ Перевод средств вам выполнен успешно. 💸\n\n"
-                 "🙏 Спасибо за использование нашего сервиса! 🤝\n\n"
-                 "Пожалуйста, подтвердите получение средств.",
+            chat_id=request_data['user_id'],
+            text=f"✅ Перевод средств по заявке #{request_id} вам выполнен успешно. 💸\n\n"
+            "🙏 Спасибо за использование нашего сервиса! 🤝\n\n"
+            "Пожалуйста, подтвердите получение средств.",
             reply_markup=keyboard, parse_mode='Markdown'
         )
 
-        session = self.bot.user_sessions.get(user_id, {})
-        updated_text = session.get('admin_text', '') + \
-            "\n\n✅4️⃣ Уведомление об отправке средств клиенту отправлено."
-        session['admin_text'] = updated_text
-        await self._update_admin_messages(session, updated_text, None)
+        self.bot.db.update_request_status(request_id, 'funds sent')
+
+        updated_text, _ = self._prepare_admin_notification(
+            self.bot.db.get_request_by_id(request_id))
+        updated_text += f"\n\n✅ Хэш: `{request_data['transaction_hash']}`"
+        updated_text += "\n\n✅4️⃣ Уведомление об отправке средств клиенту отправлено."
+        await self._update_admin_messages(request_id, updated_text, None)
 
     async def handle_decline_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
-        user_id = int(query.data.split('_')[-1])
+        request_id = int(query.data.split('_')[-1])
         admin_user = query.from_user
+
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            return
 
         support_contact = self.bot.config.support_contact
         await context.bot.send_message(
-            chat_id=user_id,
-            text=f"❌ Ваша заявка была отклонена.\n\nПо вопросам обращайтесь: {support_contact}"
+            chat_id=request_data['user_id'],
+            text=f"❌ Ваша заявка #{request_id} была отклонена.\n\nПо вопросам обращайтесь: {support_contact}"
         )
 
-        session = self.bot.user_sessions.get(user_id)
-        if session:
-            updated_text = session.get(
-                'admin_text', '') + f"\n\n❌ ЗАЯВКА ОТКЛОНЕНА (админ @{admin_user.username or admin_user.id})"
-            await self._update_admin_messages(session, updated_text, None)
-            del self.bot.user_sessions[user_id]
-        else:
-            await query.edit_message_text(
-                query.message.text + f"\n\n❌ ЗАЯВКА ОТКЛОНЕНА", reply_markup=None
-            )
+        self.bot.db.update_request_status(request_id, 'declined')
+
+        updated_text, _ = self._prepare_admin_notification(
+            self.bot.db.get_request_by_id(request_id))
+        updated_text += f"\n\n❌ ЗАЯВКА ОТКЛОНЕНА (админ @{admin_user.username or admin_user.id})"
+        await self._update_admin_messages(request_id, updated_text, None)
 
     async def handle_by_user_transfer_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
-        user_id = int(query.data.split('_')[-1])
-        session = self.bot.user_sessions.get(user_id)
-        if not session:
+        request_id = int(query.data.split('_')[-1])
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
             await query.edit_message_text("⏳ Сессия истекла. \n🔄 Пожалуйста, начните заново. \n🚀 /start", reply_markup=None)
             return
 
+        self.bot.db.update_request_status(request_id, 'completed')
+
         # Update the admin message
-        updated_text = session.get('admin_text', '') + \
-            "\n\n✅🛑 Пользователь подтвердил получение средств. 🛑✅"
-        session['admin_text'] = updated_text
-        await self._update_admin_messages(session, updated_text, None)
+        updated_text, _ = self._prepare_admin_notification(
+            self.bot.db.get_request_by_id(request_id))
+        updated_text += "\n\n✅🛑 Пользователь подтвердил получение средств. ЗАЯВКА ЗАВЕРШЕНА. 🛑✅"
+        await self._update_admin_messages(request_id, updated_text, None)
 
         # Remove the button for the user
         await query.edit_message_text(
-            text="✅ Перевод средств вам выполнен успешно. 💸\n\n"
-                 "🙏 Спасибо за использование нашего сервиса! 🤝\n\n"
-                 "✅ Вы подтвердили получение.",
+            text=f"✅ Перевод средств по заявке #{request_id} вам выполнен успешно. 💸\n\n"
+            "🙏 Спасибо за использование нашего сервиса! 🤝\n\n"
+            "✅ Вы подтвердили получение.",
             reply_markup=None,
             parse_mode='Markdown'
         )
 
-        # Delete the session after full completion
-        if user_id in self.bot.user_sessions:
-            del self.bot.user_sessions[user_id]
-
     # --- Helper Methods ---
 
-    def _prepare_admin_notification(self, user, user_data, needs_trx=False):
+    def _prepare_admin_notification(self, request_data):
         """Prepares the text and keyboard for the administrator notification."""
+        # Escape special Markdown V1 characters for any data that is NOT inside a code block.
+        username_display = 'нет'
+        if request_data['username']:
+            # Escape characters that are special in Markdown V1 (_, *, `, [)
+            username_display = request_data['username'].replace('_', '\\_').replace(
+                '*', '\\*').replace('`', '\\`').replace('[', '\\[')
+
+        # For data inside code blocks (`...`), we just need to ensure it doesn't contain a backtick.
+        # Replacing it with a single quote is a safe way to prevent breaking out of the code block.
+        def sanitize_for_code_block(text):
+            return str(text).replace('`', "'") if text else ""
+
+        bank_name_safe = sanitize_for_code_block(request_data['bank_name'])
+        fio_safe = sanitize_for_code_block(request_data['fio'])
+        card_info_safe = sanitize_for_code_block(request_data['card_info'])
+        inn_safe = sanitize_for_code_block(request_data['inn'])
+        trx_address_safe = sanitize_for_code_block(request_data['trx_address'])
+
         user_info_block = (f"👤 Пользователь:\n"
-                           f"🆔 ID: `{user.id}`\n"
-                           f"📛 Имя: `{user.first_name or '-'}`\n"
-                           f"🔗 Юзернейм: @{user.username if user.username else 'нет'}\n\n")
-        transfer_details_block = (f"🏦 Банк: `{user_data['bank_name']}`\n"
-                                  f"📝 ФИО: `{user_data['fio']}`\n"
-                                  f"💳 Реквизиты: `{user_data['card_info']}`\n"
-                                  f"📇 ИНН: `{user_data['inn']}`\n\n")
-        if needs_trx:
-            amount, sum_uah = user_data['amount'], user_data['sum_uah']
+                           f"🆔 ID: `{request_data['user_id']}`\n"
+                           f"📛 Юзернейм: @{username_display}\n\n")
+
+        transfer_details_block = (f"🏦 Банк: `{bank_name_safe}`\n"
+                                  f"📝 ФИО: `{fio_safe}`\n"
+                                  f"💳 Реквизиты: `{card_info_safe}`\n"
+                                  f"📇 ИНН: `{inn_safe}`\n\n")
+
+        title = f"📥 Заявка #{request_data['id']} (Статус: {request_data['status']})"
+
+        if request_data['needs_trx']:
+            amount, sum_uah = request_data['amount_currency'], request_data['amount_uah']
             final_amount = amount - 15
             final_sum_uah = final_amount * self.bot.config.exchange_rate
-            text = (f"📥 Новая заявка (с TRX)\n\n"
-                    f"💱 {amount} {user_data['currency']} → {sum_uah:.2f} UAH\n"
-                    f"💵 После вычета TRX: {final_amount} {user_data['currency']} → {final_sum_uah:.2f} UAH\n\n"
+            text = (f"{title} (с TRX)\n\n"
+                    f"💱 {amount} {request_data['currency']} → {sum_uah:.2f} UAH\n"
+                    f"💵 После вычета TRX: {final_amount} {request_data['currency']} → {final_sum_uah:.2f} UAH\n\n"
                     f"{user_info_block}{transfer_details_block}"
-                    f"⚠️ Клиент нуждается в TRX.\n📬 TRX-адрес: `{user_data['trx_address']}`")
+                    f"⚠️ Клиент нуждается в TRX.\n📬 TRX-адрес: `{trx_address_safe}`")
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("✅ TRX переведено",
-                                     callback_data=f"confirm_trx_transfer_{user.id}"),
-                InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{user.id}")
+                                     callback_data=f"confirm_trx_transfer_{request_data['id']}"),
+                InlineKeyboardButton(
+                    "❌ Отказать", callback_data=f"decline_request_{request_data['id']}")
             ]])
         else:
-            text = (f"📥 Новая заявка на обмен\n\n"
-                    f"💱 {user_data['amount']} {user_data['currency']} → {user_data['sum_uah']:.2f} UAH\n\n"
+            text = (f"{title}\n\n"
+                    f"💱 {request_data['amount_currency']} {request_data['currency']} → {request_data['amount_uah']:.2f} UAH\n\n"
                     f"{user_info_block}{transfer_details_block}")
             keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{user.id}")
+                InlineKeyboardButton(
+                    "❌ Отказать", callback_data=f"decline_request_{request_data['id']}")
             ]])
         return text, keyboard
 
-    async def _send_admin_notification(self, user_id, text, keyboard):
+    async def _send_admin_notification(self, request_id):
         """Sends notifications to all administrators."""
         admin_ids = self.bot.config.admin_ids
         if not admin_ids:
             return
 
-        session = self.bot.user_sessions.get(user_id)
-        if not session:
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
             return
 
+        text, keyboard = self._prepare_admin_notification(request_data)
+
         admin_message_ids = {}
+
         for admin_id in admin_ids:
             try:
                 msg = await self.bot.application.bot.send_message(
@@ -524,12 +595,17 @@ class ExchangeHandler:
             except Exception as e:
                 logger.error(f"Failed to send message to admin {admin_id}: {e}")
 
-        session['admin_message_ids'] = admin_message_ids
-        session['admin_text'] = text
+        # Store message IDs as a JSON string in the database
+        self.bot.db.update_request_data(
+            request_id, {'admin_message_ids': json.dumps(admin_message_ids)})
 
-    async def _update_admin_messages(self, session, text, reply_markup):
+    async def _update_admin_messages(self, request_id, text, reply_markup):
         """Updates messages for all administrators."""
-        admin_message_ids = session.get('admin_message_ids', {})
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data or not request_data['admin_message_ids']:
+            return
+
+        admin_message_ids = json.loads(request_data['admin_message_ids'])
         for admin_id, message_id in admin_message_ids.items():
             try:
                 await self.bot.application.bot.edit_message_text(
@@ -537,7 +613,8 @@ class ExchangeHandler:
                     reply_markup=reply_markup, parse_mode='Markdown'
                 )
             except Exception as e:
-                logger.error(f"Failed to update message for admin {admin_id}: {e}")
+                # The message might have been deleted or the bot blocked.
+                logger.warning(f"Failed to update message for admin {admin_id}: {e}")
 
     def setup_handlers(self, application):
         """Creates and registers all handlers related to the exchange process."""
@@ -573,15 +650,16 @@ class ExchangeHandler:
         application.add_handler(exchange_conv_handler)
         application.add_handler(hash_conv_handler)
 
+        # Regex patterns now match any number of digits for the request_id
         application.add_handler(CallbackQueryHandler(
-            self.handle_decline_request, pattern=r'^decline_request_'))
+            self.handle_decline_request, pattern=r'^decline_request_\d+'))
         application.add_handler(CallbackQueryHandler(
-            self.handle_payment_confirmation, pattern=r'^confirm_payment_'))
+            self.handle_payment_confirmation, pattern=r'^confirm_payment_\d+'))
         application.add_handler(CallbackQueryHandler(
-            self.handle_transfer_confirmation, pattern=r'^confirm_transfer_'))
+            self.handle_transfer_confirmation, pattern=r'^confirm_transfer_\d+'))
         application.add_handler(CallbackQueryHandler(
-            self.handle_transfer_confirmation_trx, pattern=r'^confirm_trx_transfer_'))
+            self.handle_transfer_confirmation_trx, pattern=r'^confirm_trx_transfer_\d+'))
         application.add_handler(CallbackQueryHandler(
-            self.handle_by_user_transfer_confirmation, pattern=r'^by_user_confirm_transfer_'))
+            self.handle_by_user_transfer_confirmation, pattern=r'^by_user_confirm_transfer_\d+'))
 
         application.add_handler(CommandHandler('start', self.start_command))
