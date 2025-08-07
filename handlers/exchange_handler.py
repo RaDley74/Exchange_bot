@@ -11,12 +11,12 @@ logger = logging.getLogger(__name__)
 
 class ExchangeHandler:
     """
-    Обрабатывает всю логику, связанную с процессом обмена валюты:
-    - Диалог с пользователем (ConversationHandler)
-    - Уведомления администраторам
-    - Обработка действий администраторов (подтверждение, отказ)
+    Handles all logic related to the currency exchange process:
+    - User dialog (ConversationHandler)
+    - Notifications to administrators
+    - Handling administrator actions (confirmation, denial)
     """
-    # Состояния диалога вынесены как атрибуты класса для ясности
+    # Conversation states are defined as class attributes for clarity
     (
         CHOOSING_CURRENCY, ENTERING_AMOUNT, ENTERING_BANK_NAME, ENTERING_CARD_DETAILS,
         ENTERING_FIO_DETAILS, ENTERING_INN_DETAILS, CONFIRMING_EXCHANGE,
@@ -26,15 +26,15 @@ class ExchangeHandler:
 
     def __init__(self, bot_instance):
         """
-        Конструктор получает экземпляр главного класса Bot,
-        чтобы иметь доступ к общим ресурсам, таким как конфигурация и сессии.
+        The constructor receives the main Bot instance to access
+        shared resources like configuration and sessions.
         """
         self.bot = bot_instance
 
-    # --- Главное меню и его обработка ---
+    # --- Main Menu and its handling ---
 
     async def main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Отправляет или редактирует сообщение, чтобы показать главное меню."""
+        """Sends or edits a message to show the main menu."""
         keyboard = [
             [
                 InlineKeyboardButton("➸ Обменять", callback_data='exchange'),
@@ -54,26 +54,26 @@ class ExchangeHandler:
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обрабатывает команду /start, когда нет активного диалога."""
+        """Handles the /start command when there is no active conversation."""
         user = update.effective_user
-        logger.info(f"User {user.id} ({user.username}) запустил бота.")
+        logger.info(f"User {user.id} ({user.username}) started the bot.")
         await self.main_menu(update, context)
 
     async def cancel_and_restart(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Завершает текущий диалог и показывает главное меню."""
+        """Ends the current conversation and shows the main menu."""
         user = update.effective_user
         logger.info(
-            f"User {user.id} ({user.username}) использовал /start для отмены или перезапуска диалога.")
+            f"User {user.id} ({user.username}) used /start to cancel or restart the conversation.")
         await self.main_menu(update, context)
         return ConversationHandler.END
 
     async def handle_menu_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обрабатывает нажатия кнопок в главном меню, запуская диалог."""
+        """Handles main menu button presses, starting a conversation."""
         query = update.callback_query
         await query.answer()
         data = query.data
         user = query.from_user
-        logger.info(f"User {user.id} ({user.username}) выбрал опцию меню: {data}")
+        logger.info(f"User {user.id} ({user.username}) selected menu option: {data}")
 
         if data == 'rate':
             keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]]
@@ -102,7 +102,7 @@ class ExchangeHandler:
 
         return ConversationHandler.END
 
-    # --- Методы ConversationHandler для процесса обмена ---
+    # --- ConversationHandler methods for the exchange process ---
 
     async def choosing_currency(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -113,11 +113,11 @@ class ExchangeHandler:
         if data == 'currency_usdt':
             context.user_data['currency'] = 'USDT'
             logger.info(
-                f"User {user.id} ({user.username}) выбрал валюту: {context.user_data['currency']}")
+                f"User {user.id} ({user.username}) chose currency: {context.user_data['currency']}")
             await query.edit_message_text(f"💰 Введите сумму для обмена (в {context.user_data['currency']}):")
             return self.ENTERING_AMOUNT
         elif data == 'back_to_menu':
-            logger.info(f"User {user.id} ({user.username}) вернулся в главное меню.")
+            logger.info(f"User {user.id} ({user.username}) returned to the main menu.")
             await self.main_menu(update, context)
             return ConversationHandler.END
         return ConversationHandler.END
@@ -139,7 +139,7 @@ class ExchangeHandler:
         sum_uah = amount * self.bot.config.exchange_rate
         context.user_data['sum_uah'] = sum_uah
         logger.info(
-            f"User {user.id} ввел сумму: {amount} {currency}. Расчетная сумма: {sum_uah:.2f} UAH.")
+            f"User {user.id} entered amount: {amount} {currency}. Calculated sum: {sum_uah:.2f} UAH.")
 
         await update.message.reply_text(
             f"✅ Хорошо! К оплате: {sum_uah:.2f} UAH.\n\n🏦 Пожалуйста, укажите название банка."
@@ -153,7 +153,7 @@ class ExchangeHandler:
             return self.ENTERING_BANK_NAME
 
         context.user_data['bank_name'] = bank_name
-        logger.info(f"User {update.effective_user.id} ввел банк: {bank_name}")
+        logger.info(f"User {update.effective_user.id} entered bank: {bank_name}")
         await update.message.reply_text(
             f"🏦 Вы указали банк: {bank_name}\n\n💳 Введите реквизиты вашей банковской карты:"
         )
@@ -231,7 +231,7 @@ class ExchangeHandler:
 
     async def _process_standard_exchange(self, query: Update.callback_query, context: ContextTypes.DEFAULT_TYPE):
         user = query.from_user
-        logger.info(f"Создание стандартной заявки на обмен для user {user.id}.")
+        logger.info(f"Creating a standard exchange request for user {user.id}.")
 
         self.bot.user_sessions[user.id] = context.user_data.copy()
 
@@ -348,7 +348,7 @@ class ExchangeHandler:
         await update.message.reply_text("✅ Спасибо, ваш хэш получен и отправлен на проверку.")
         return ConversationHandler.END
 
-    # --- Обработчики колбэков от админов ---
+    # --- Admin Callback Handlers ---
 
     async def handle_transfer_confirmation_trx(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -450,13 +450,13 @@ class ExchangeHandler:
             await query.edit_message_text("⏳ Сессия истекла. \n🔄 Пожалуйста, начните заново. \n🚀 /start", reply_markup=None)
             return
 
-        # Обновляем сообщение у админа
+        # Update the admin message
         updated_text = session.get('admin_text', '') + \
             "\n\n✅🛑 Пользователь подтвердил получение средств. 🛑✅"
         session['admin_text'] = updated_text
         await self._update_admin_messages(session, updated_text, None)
 
-        # Убираем кнопку у пользователя
+        # Remove the button for the user
         await query.edit_message_text(
             text="✅ Перевод средств вам выполнен успешно. 💸\n\n"
                  "🙏 Спасибо за использование нашего сервиса! 🤝\n\n"
@@ -465,22 +465,22 @@ class ExchangeHandler:
             parse_mode='Markdown'
         )
 
-        # Удаляем сессию после полного завершения
+        # Delete the session after full completion
         if user_id in self.bot.user_sessions:
             del self.bot.user_sessions[user_id]
 
-    # --- Вспомогательные методы ---
+    # --- Helper Methods ---
 
     def _prepare_admin_notification(self, user, user_data, needs_trx=False):
-        """Готовит текст и клавиатуру для уведомления администратора."""
-        user_info = (f"👤 Пользователь:\n"
-                     f"🆔 ID: `{user.id}`\n"
-                     f"📛 Имя: `{user.first_name or '-'}`\n"
-                     f"🔗 Юзернейм: @{user.username if user.username else 'нет'}\n\n")
-        transfer_info = (f"🏦 Банк: `{user_data['bank_name']}`\n"
-                         f"📝 ФИО: `{user_data['fio']}`\n"
-                         f"💳 Реквизиты: `{user_data['card_info']}`\n"
-                         f"📇 ИНН: `{user_data['inn']}`\n\n")
+        """Prepares the text and keyboard for the administrator notification."""
+        user_info_block = (f"👤 Пользователь:\n"
+                           f"🆔 ID: `{user.id}`\n"
+                           f"📛 Имя: `{user.first_name or '-'}`\n"
+                           f"🔗 Юзернейм: @{user.username if user.username else 'нет'}\n\n")
+        transfer_details_block = (f"🏦 Банк: `{user_data['bank_name']}`\n"
+                                  f"📝 ФИО: `{user_data['fio']}`\n"
+                                  f"💳 Реквизиты: `{user_data['card_info']}`\n"
+                                  f"📇 ИНН: `{user_data['inn']}`\n\n")
         if needs_trx:
             amount, sum_uah = user_data['amount'], user_data['sum_uah']
             final_amount = amount - 15
@@ -488,7 +488,7 @@ class ExchangeHandler:
             text = (f"📥 Новая заявка (с TRX)\n\n"
                     f"💱 {amount} {user_data['currency']} → {sum_uah:.2f} UAH\n"
                     f"💵 После вычета TRX: {final_amount} {user_data['currency']} → {final_sum_uah:.2f} UAH\n\n"
-                    f"{user_info}{transfer_info}"
+                    f"{user_info_block}{transfer_details_block}"
                     f"⚠️ Клиент нуждается в TRX.\n📬 TRX-адрес: `{user_data['trx_address']}`")
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("✅ TRX переведено",
@@ -498,14 +498,14 @@ class ExchangeHandler:
         else:
             text = (f"📥 Новая заявка на обмен\n\n"
                     f"💱 {user_data['amount']} {user_data['currency']} → {user_data['sum_uah']:.2f} UAH\n\n"
-                    f"{user_info}{transfer_info}")
+                    f"{user_info_block}{transfer_details_block}")
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{user.id}")
             ]])
         return text, keyboard
 
     async def _send_admin_notification(self, user_id, text, keyboard):
-        """Отправляет уведомления всем администраторам."""
+        """Sends notifications to all administrators."""
         admin_ids = self.bot.config.admin_ids
         if not admin_ids:
             return
@@ -522,13 +522,13 @@ class ExchangeHandler:
                 )
                 admin_message_ids[admin_id] = msg.message_id
             except Exception as e:
-                logger.error(f"Не удалось отправить сообщение админу {admin_id}: {e}")
+                logger.error(f"Failed to send message to admin {admin_id}: {e}")
 
         session['admin_message_ids'] = admin_message_ids
         session['admin_text'] = text
 
     async def _update_admin_messages(self, session, text, reply_markup):
-        """Обновляет сообщения у всех администраторов."""
+        """Updates messages for all administrators."""
         admin_message_ids = session.get('admin_message_ids', {})
         for admin_id, message_id in admin_message_ids.items():
             try:
@@ -537,12 +537,12 @@ class ExchangeHandler:
                     reply_markup=reply_markup, parse_mode='Markdown'
                 )
             except Exception as e:
-                logger.error(f"Не удалось обновить сообщение у админа {admin_id}: {e}")
+                logger.error(f"Failed to update message for admin {admin_id}: {e}")
 
     def setup_handlers(self, application):
-        """Создает и регистрирует все обработчики, связанные с обменом."""
+        """Creates and registers all handlers related to the exchange process."""
 
-        conv_handler = ConversationHandler(
+        exchange_conv_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(
                 self.handle_menu_callback, pattern='^(exchange|rate|user_help|back_to_menu)$')],
             states={
@@ -561,7 +561,7 @@ class ExchangeHandler:
             per_message=False
         )
 
-        hash_handler = ConversationHandler(
+        hash_conv_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(
                 self.ask_for_hash, pattern=r'^user_confirms_sending_')],
             states={
@@ -570,8 +570,8 @@ class ExchangeHandler:
             fallbacks=[CommandHandler('start', self.cancel_and_restart)],
         )
 
-        application.add_handler(conv_handler)
-        application.add_handler(hash_handler)
+        application.add_handler(exchange_conv_handler)
+        application.add_handler(hash_conv_handler)
 
         application.add_handler(CallbackQueryHandler(
             self.handle_decline_request, pattern=r'^decline_request_'))

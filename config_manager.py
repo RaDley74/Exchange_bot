@@ -10,43 +10,43 @@ logger = logging.getLogger(__name__)
 
 class ConfigManager:
     """
-    Класс для управления конфигурацией бота из файла settings.ini.
-    Инкапсулирует чтение, запись и доступ к настройкам.
+    A class for managing the bot's configuration from the settings.ini file.
+    It encapsulates reading, writing, and accessing settings.
     """
 
     def __init__(self, file_path='settings.ini'):
         self.file_path = file_path
         self._config = configparser.ConfigParser()
-        # Приватная переменная _loop для асинхронного сохранения
+        # Private _loop variable for asynchronous saving
         self._loop = None
 
     def load(self):
         """
-        Синхронно загружает конфигурацию. Если файл не найден,
-        создает его со значениями по умолчанию.
+        Synchronously loads the configuration. If the file is not found,
+        it creates a new one with default values.
         """
         if not os.path.exists(self.file_path):
             logger.warning(
-                f"Файл конфигурации '{self.file_path}' не найден. Создание нового файла.")
+                f"Configuration file '{self.file_path}' not found. Creating a new file.")
             self._create_default_config()
             try:
                 with open(self.file_path, 'w', encoding='utf-8') as config_file:
                     self._config.write(config_file)
                 logger.info(
-                    f"Файл конфигурации '{self.file_path}' создан. Отредактируйте его и перезапустите бота.")
+                    f"Configuration file '{self.file_path}' created. Please edit it and restart the bot.")
                 print(
-                    f"Файл конфигурации '{self.file_path}' создан. Укажите токен и ID, затем перезапустите скрипт.")
-                input("Нажмите Enter для выхода...")
+                    f"Configuration file '{self.file_path}' created. Specify the token and ID, then restart the script.")
+                input("Press Enter to exit...")
                 exit(0)
             except IOError as e:
-                logger.error(f"Не удалось создать файл конфигурации: {e}")
+                logger.error(f"Failed to create configuration file: {e}")
                 exit(1)
         else:
             self._config.read(self.file_path, encoding='utf-8')
-            logger.info(f"Файл конфигурации '{self.file_path}' успешно загружен.")
+            logger.info(f"Configuration file '{self.file_path}' loaded successfully.")
 
     def _create_default_config(self):
-        """Создает структуру конфигурации по умолчанию."""
+        """Creates the default configuration structure."""
         self._config['User'] = {
             'TOKEN': 'your_token_here',
             'ADMIN_CHAT_ID': 'your_admin_chat_id_here',
@@ -59,34 +59,34 @@ class ConfigManager:
         }
 
     def _save_sync(self):
-        """Синхронная функция для записи конфигурации в файл."""
+        """Synchronous function to write the configuration to a file."""
         try:
             with open(self.file_path, 'w', encoding='utf-8') as config_file:
                 self._config.write(config_file)
-            logger.info("Конфигурация успешно сохранена.")
+            logger.info("Configuration saved successfully.")
         except IOError as e:
-            logger.error(f"Ошибка при сохранении конфигурации: {e}")
+            logger.error(f"Error while saving configuration: {e}")
 
     async def save(self):
         """
-        Асинхронно сохраняет текущую конфигурацию, не блокируя event loop.
+        Asynchronously saves the current configuration without blocking the event loop.
         """
         if self._loop is None:
             self._loop = asyncio.get_running_loop()
         await self._loop.run_in_executor(None, self._save_sync)
 
     def get(self, section, option, fallback=None):
-        """Универсальный метод для получения значения из конфигурации."""
+        """Universal method for getting a value from the configuration."""
         return self._config.get(section, option, fallback=fallback)
 
     def set(self, section, option, value):
-        """Универсальный метод для установки значения в конфигурации."""
+        """Universal method for setting a value in the configuration."""
         if not self._config.has_section(section):
             self._config.add_section(section)
         self._config.set(section, option, str(value))
 
-    # --- Свойства для удобного доступа к настройкам ---
-    # Это позволяет писать bot.config.token вместо bot.config.get('User', 'TOKEN')
+    # --- Properties for convenient access to settings ---
+    # This allows writing bot.config.token instead of bot.config.get('User', 'TOKEN')
 
     @property
     def token(self) -> str:
@@ -100,7 +100,8 @@ class ConfigManager:
         try:
             return [int(admin_id.strip()) for admin_id in admin_ids_str.split(',')]
         except ValueError:
-            logger.error("Ошибка в формате ADMIN_CHAT_ID. Убедитесь, что это числа через запятую.")
+            logger.error(
+                "Error in ADMIN_CHAT_ID format. Ensure it's a comma-separated list of numbers.")
             return []
 
     @property

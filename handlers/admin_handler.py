@@ -9,11 +9,12 @@ from telegram.ext import (
 
 logger = logging.getLogger(__name__)
 
+
 class AdminPanelHandler:
     """
-    Обрабатывает всю логику, связанную с админ-панелью.
+    Handles all logic related to the admin panel.
     """
-    # Этапы разговора вынесены как атрибуты класса для ясности
+    # Conversation states are defined as class attributes for clarity
     (
         ASK_PASSWORD,
         ADMIN_MENU,
@@ -26,14 +27,14 @@ class AdminPanelHandler:
 
     def __init__(self, bot_instance):
         """
-        Конструктор получает экземпляр главного класса Bot,
-        чтобы иметь доступ к общим ресурсам, таким как конфигурация.
+        The constructor receives the main Bot instance
+        to access shared resources like configuration.
         """
         self.bot = bot_instance
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
-        logger.info(f"User {user.id} ({user.username}) пытается войти в админ-панель.")
+        logger.info(f"User {user.id} ({user.username}) is trying to access the admin panel.")
 
         if not self.bot.config.admin_ids:
             await update.message.reply_text("❌ Бот не активирован. Нет ID администратора.")
@@ -51,15 +52,15 @@ class AdminPanelHandler:
         user = update.effective_user
 
         if entered_password == self.bot.config.admin_password:
-            logger.info(f"Admin {user.id} ({user.username}) ввел верный пароль.")
+            logger.info(f"Admin {user.id} ({user.username}) entered the correct password.")
             return await self._show_main_menu(update)
         else:
-            logger.warning(f"Admin {user.id} ({user.username}) ввел неверный пароль.")
+            logger.warning(f"Admin {user.id} ({user.username}) entered the wrong password.")
             await update.message.reply_text("❌ Неверный пароль. Попробуйте снова:")
             return self.ASK_PASSWORD
 
     async def _show_main_menu(self, update: Update):
-        logger.info(f"Отображение главного меню админки для {update.effective_user.id}.")
+        logger.info(f"Displaying admin main menu for {update.effective_user.id}.")
         keyboard = [
             [
                 InlineKeyboardButton("📊 Информация", callback_data='admin_info'),
@@ -73,7 +74,7 @@ class AdminPanelHandler:
             await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
         else:
             await update.message.reply_text(text, reply_markup=reply_markup)
-        
+
         return self.ADMIN_MENU
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -81,7 +82,7 @@ class AdminPanelHandler:
         await query.answer()
         data = query.data
         user = query.from_user
-        logger.info(f"Admin {user.id} ({user.username}) выбрал опцию: {data}")
+        logger.info(f"Admin {user.id} ({user.username}) selected option: {data}")
 
         if user.id not in self.bot.config.admin_ids:
             await query.message.reply_text("🚫 У вас нет доступа.")
@@ -105,7 +106,7 @@ class AdminPanelHandler:
         elif data == 'admin_set_support':
             await query.edit_message_text("📞 Введите новый контакт поддержки:")
             return self.SET_SUPPORT
-        
+
         return self.ADMIN_MENU
 
     async def _show_info(self, query):
@@ -119,7 +120,8 @@ class AdminPanelHandler:
             f"💼 <b>Кошелёк:</b> <code>{self.bot.config.wallet_address}</code>\n"
             f"📞 <b>Поддержка:</b> <code>{self.bot.config.support_contact}</code>"
         )
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data='admin_back_menu')]])
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("⬅️ Назад", callback_data='admin_back_menu')]])
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
         return self.ADMIN_MENU
 
@@ -137,7 +139,7 @@ class AdminPanelHandler:
     async def set_new_password(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.bot.config.admin_password = update.message.text.strip()
         await self.bot.config.save()
-        logger.info(f"Admin {update.effective_user.id} обновил пароль.")
+        logger.info(f"Admin {update.effective_user.id} updated the password.")
         await update.message.reply_text("✅ Пароль обновлён.")
         return await self._show_main_menu(update)
 
@@ -146,7 +148,8 @@ class AdminPanelHandler:
             new_rate = float(update.message.text.strip().replace(',', '.'))
             self.bot.config.exchange_rate = new_rate
             await self.bot.config.save()
-            logger.info(f"Admin {update.effective_user.id} обновил курс на: {new_rate}")
+            logger.info(
+                f"Admin {update.effective_user.id} updated the exchange rate to: {new_rate}")
             await update.message.reply_text("✅ Курс обновлён.")
         except ValueError:
             await update.message.reply_text("❌ Ошибка: введите корректное число.")
@@ -155,10 +158,10 @@ class AdminPanelHandler:
     async def set_wallet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.bot.config.wallet_address = update.message.text.strip()
         await self.bot.config.save()
-        logger.info(f"Admin {update.effective_user.id} обновил кошелёк.")
+        logger.info(f"Admin {update.effective_user.id} updated the wallet address.")
         await update.message.reply_text("✅ Кошелёк обновлён.")
         return await self._show_main_menu(update)
-    
+
     async def set_support_contact(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_support = update.message.text.strip()
         if not re.fullmatch(r"[A-Za-z0-9@._\- ]+", new_support):
@@ -167,20 +170,20 @@ class AdminPanelHandler:
         else:
             self.bot.config.support_contact = new_support
             await self.bot.config.save()
-            logger.info(f"Admin {update.effective_user.id} обновил контакт поддержки.")
+            logger.info(f"Admin {update.effective_user.id} updated the support contact.")
             await update.message.reply_text("✅ Контакт поддержки обновлён.")
         return await self._show_main_menu(update)
-    
+
     async def close(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         if user.id in self.bot.config.admin_ids:
-            logger.info(f"Admin {user.id} закрыл админ-панель.")
+            logger.info(f"Admin {user.id} closed the admin panel.")
             await update.message.reply_text("🔒 Админ-панель закрыта.")
         return ConversationHandler.END
 
     def setup_handlers(self, application):
-        """Создает и регистрирует обработчики для админ-панели."""
-        admin_handler = ConversationHandler(
+        """Creates and registers the handlers for the admin panel."""
+        admin_conversation_handler = ConversationHandler(
             entry_points=[CommandHandler('a', self.start)],
             states={
                 self.ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.check_password)],
@@ -193,4 +196,4 @@ class AdminPanelHandler:
             },
             fallbacks=[CommandHandler('a', self.start), CommandHandler('ac', self.close)]
         )
-        application.add_handler(admin_handler)
+        application.add_handler(admin_conversation_handler)
