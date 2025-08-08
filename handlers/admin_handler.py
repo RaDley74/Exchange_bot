@@ -15,7 +15,7 @@ class AdminPanelHandler:
     """
     Handles all logic related to the admin panel.
     """
-    # Conversation states are defined as class attributes for clarity
+    # Conversation states
     (
         ASK_PASSWORD,
         ADMIN_MENU,
@@ -26,7 +26,22 @@ class AdminPanelHandler:
         SET_SUPPORT,
         AWAIT_USER_FOR_APPS,
         AWAIT_REQUEST_ID_FOR_RESTORE,
-    ) = range(9)
+        AWAIT_REQUEST_ID_FOR_STATUS_CHANGE,
+        SELECT_NEW_STATUS,
+    ) = range(11)
+
+    # Упорядоченный список статусов, определяющий основной рабочий процесс
+    WORKFLOW_STATUSES = [
+        'new',
+        'awaiting trx transfer',
+        'awaiting payment',
+        'awaiting confirmation',
+        'payment received',
+        'funds sent',
+        'completed'
+    ]
+    # Конечные статусы, из которых нельзя изменить состояние
+    TERMINAL_STATUSES = ['completed', 'declined']
 
     def __init__(self, bot_instance):
         """
@@ -56,13 +71,13 @@ class AdminPanelHandler:
 
         if entered_password == self.bot.config.admin_password:
             logger.info(f"Admin {user.id} ({user.username}) entered the correct password.")
-            return await self._show_main_menu(update)
+            return await self._show_main_menu(update, context)
         else:
             logger.warning(f"Admin {user.id} ({user.username}) entered the wrong password.")
             await update.message.reply_text("❌ Неверный пароль. Попробуйте снова:")
             return self.ASK_PASSWORD
 
-    async def _show_main_menu(self, update: Update):
+    async def _show_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Displaying admin main menu for {update.effective_user.id}.")
         keyboard = [
             [
@@ -73,12 +88,23 @@ class AdminPanelHandler:
                 InlineKeyboardButton("🔍 Найти заявки", callback_data='find_user_applications'),
                 InlineKeyboardButton("🔄 Восстановить заявку", callback_data='restore_application'),
             ],
+            [
+                InlineKeyboardButton("🔧 Изменить статус", callback_data='change_status'),
+            ],
         ]
         text = "⚙️ Админ-панель"
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         if update.callback_query:
-            await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+            try:
+                await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+            except TelegramError as e:
+                logger.warning(f"Could not edit admin menu message, sending new one. Error: {e}")
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=text,
+                    reply_markup=reply_markup
+                )
         else:
             await update.message.reply_text(text, reply_markup=reply_markup)
 
@@ -100,7 +126,7 @@ class AdminPanelHandler:
         elif data == 'admin_settings':
             return await self._show_settings_menu(query)
         elif data == 'admin_back_menu':
-            return await self._show_main_menu(update)
+            return await self._show_main_menu(update, context)
         elif data == 'admin_set_password':
             await query.edit_message_text("🔐 Введите новый пароль:")
             return self.SET_NEW_PASSWORD
@@ -119,8 +145,112 @@ class AdminPanelHandler:
         elif data == 'restore_application':
             await query.edit_message_text("Введите ID заявки, которую нужно восстановить:")
             return self.AWAIT_REQUEST_ID_FOR_RESTORE
+        elif data == 'change_status':
+            await query.edit_message_text("Введите ID заявки для изменения статуса:")
+            return self.AWAIT_REQUEST_ID_FOR_STATUS_CHANGE
 
         return self.ADMIN_MENU
+
+    async def show_status_selection_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Shows a menu with available future statuses for a given request ID."""
+        admin_user = update.effective_user
+        try:
+            request_id = int(update.message.text.strip())
+        except (ValueError, TypeError):
+            await update.message.reply_text("❌ ID заявки должен быть числом. Попробуйте снова.")
+            return self.AWAIT_REQUEST_ID_FOR_STATUS_CHANGE
+
+        logger.info(f"Admin {admin_user.id} wants to change status for request #{request_id}.")
+
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            await update.message.reply_text(f"❌ Заявка с ID #{request_id} не найдена.")
+            return await self._show_main_menu(update, context)
+
+        current_status = request_data['status']
+        if current_status in self.TERMINAL_STATUSES:
+            await update.message.reply_text(f"❌ Заявка #{request_id} уже завершена или отклонена и ее статус изменить нельзя.")
+            return await self._show_main_menu(update, context)
+
+        context.user_data['request_id_for_status_change'] = request_id
+
+        keyboard = []
+        statuses_to_show = []
+
+        # Определяем, какие статусы можно установить
+        try:
+            current_index = self.WORKFLOW_STATUSES.index(current_status)
+            # Добавляем все последующие статусы из основного рабочего процесса
+            statuses_to_show.extend(self.WORKFLOW_STATUSES[current_index + 1:])
+        except ValueError:
+            # Если текущий статус не в основном потоке (маловероятно, но возможно),
+            # то для безопасности предлагаем все не-терминальные статусы
+            logger.warning(
+                f"Status '{current_status}' for request #{request_id} not in WORKFLOW_STATUSES. Offering fallback options.")
+            statuses_to_show.extend(
+                [s for s in self.WORKFLOW_STATUSES if s not in self.TERMINAL_STATUSES])
+
+        # Всегда добавляем "Отклонено" как возможный вариант
+        statuses_to_show.append('declined')
+
+        for status in statuses_to_show:
+            translated_status = self.bot.exchange_handler.translate_status(status)
+            keyboard.append([InlineKeyboardButton(
+                f"» {translated_status}", callback_data=f"set_status_{status}")])
+
+        keyboard.append([InlineKeyboardButton("⬅️ Назад в меню", callback_data='admin_back_menu')])
+
+        current_translated_status = self.bot.exchange_handler.translate_status(current_status)
+        await update.message.reply_text(
+            f"Выберите новый статус для заявки #{request_id} (текущий: {current_translated_status}):",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+        return self.SELECT_NEW_STATUS
+
+    async def process_status_change(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Processes the admin's choice of a new status."""
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        admin_user = query.from_user
+
+        if data == 'admin_back_menu':
+            await query.delete_message()
+            return await self._show_main_menu(update, context)
+
+        request_id = context.user_data.get('request_id_for_status_change')
+        if not request_id:
+            await query.edit_message_text("❌ Произошла ошибка сессии. Пожалуйста, начните сначала.")
+            return await self._show_main_menu(update, context)
+
+        new_status = data.replace('set_status_', '')
+        logger.info(
+            f"Admin {admin_user.id} is changing status of request #{request_id} to '{new_status}'.")
+
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            await query.edit_message_text(f"❌ Заявка с ID #{request_id} больше не найдена.")
+            return await self._show_main_menu(update, context)
+
+        # Update status in the database
+        self.bot.db.update_request_status(request_id, new_status)
+        translated_new_status = self.bot.exchange_handler.translate_status(new_status)
+        await query.edit_message_text(f"✅ Статус для заявки #{request_id} обновлен на '{translated_new_status}'.\n\nПересоздаю сообщения для пользователя и админов...")
+
+        # Delete old messages and resend new ones based on the new status
+        try:
+            await self._delete_old_messages(request_data, context)
+            await self.bot.exchange_handler.resend_messages_for_request(request_id)
+            await query.message.reply_text(f"✅ Сообщения для заявки #{request_id} успешно обновлены.")
+            logger.info(
+                f"Successfully updated messages for request #{request_id} after manual status change.")
+        except Exception as e:
+            await query.message.reply_text(f"🚫 Произошла ошибка при обновлении сообщений: {e}")
+            logger.error(
+                f"Failed to update messages for request #{request_id} after manual status change: {e}", exc_info=True)
+
+        return await self._show_main_menu(update, context)
 
     async def restore_application(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
@@ -138,17 +268,15 @@ class AdminPanelHandler:
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
             await update.message.reply_text(f"❌ Заявка с ID #{request_id} не найдена.")
-            return await self._show_main_menu(update)
+            return await self._show_main_menu(update, context)
 
-        if request_data['status'] in ['completed', 'declined']:
+        if request_data['status'] in self.TERMINAL_STATUSES:
             await update.message.reply_text(f"❌ Заявка #{request_id} уже завершена или отклонена и не может быть восстановлена.")
-            return await self._show_main_menu(update)
+            return await self._show_main_menu(update, context)
 
         await self._delete_old_messages(request_data, context)
 
         try:
-            # Вызываем метод из exchange_handler, который пересоздаст сообщения
-            # context убран, он больше не нужен
             await self.bot.exchange_handler.resend_messages_for_request(request_id)
             await update.message.reply_text(f"✅ Сообщения для заявки #{request_id} были успешно пересозданы для пользователя и администраторов.")
             logger.info(f"Successfully restored messages for request #{request_id}.")
@@ -156,13 +284,12 @@ class AdminPanelHandler:
             await update.message.reply_text(f"🚫 Произошла ошибка при восстановлении заявки: {e}")
             logger.error(f"Failed to restore request #{request_id}: {e}", exc_info=True)
 
-        return await self._show_main_menu(update)
+        return await self._show_main_menu(update, context)
 
     async def _delete_old_messages(self, request_data: dict, context: ContextTypes.DEFAULT_TYPE):
         """Safely deletes old messages related to a request for user and admins."""
         logger.info(f"Attempting to delete old messages for request #{request_data['id']}.")
 
-        # Удаление сообщения пользователя
         if request_data['user_message_id']:
             try:
                 await context.bot.delete_message(
@@ -174,7 +301,6 @@ class AdminPanelHandler:
             except TelegramError as e:
                 logger.warning(f"Could not delete message for user {request_data['user_id']}: {e}")
 
-        # Удаление сообщений администраторов
         if request_data['admin_message_ids']:
             try:
                 admin_message_ids = json.loads(request_data['admin_message_ids'])
@@ -220,16 +346,8 @@ class AdminPanelHandler:
         admin_user = update.effective_user
         logger.info(f"Admin {admin_user.id} is searching for applications of user: {user_input}")
 
-        # --- Начало симуляции данных ---
-        # В реальном приложении здесь будет запрос к вашей базе данных
-        # print(f"Mock data for user '{user_input}': {mock_data_dict}")
-
-        # input(f"Press Enter to continue...")  # Для отладки, чтобы увидеть данные в консоли
-        # Предполагаем, что у пользователя может быть несколько заявок
         all_applications = self.bot.db.get_request_by_user_id_or_login(user_input)
-        logger.info(f"Mock applications for user '{user_input}': {all_applications}")
-        # input(f"Press Enter to continue...")  # Для отладки, чтобы увидеть данные в консоли
-        # --- Конец симуляции данных ---
+        logger.info(f"Found applications for user '{user_input}': {all_applications}")
 
         if all_applications:
             await update.message.reply_text(f"✅ Найдены активные заявки ({len(all_applications)} шт.):")
@@ -239,14 +357,14 @@ class AdminPanelHandler:
         else:
             await update.message.reply_text("❌ Активных заявок для данного пользователя не найдено.")
 
-        return await self._show_main_menu(update)
+        return await self._show_main_menu(update, context)
 
     def _format_application_info(self, app) -> str:
         """Форматирует информацию о заявке для вывода."""
         return (
             f"<b>Заявка ID:</b> <code>{app['id']}</code>\n"
             f"<b>Пользователь:</b> @{app['username']} (<code>{app['user_id']}</code>)\n"
-            f"<b>Статус:</b> {app['status']}\n"
+            f"<b>Статус:</b> {self.bot.exchange_handler.translate_status(app['status'])}\n"
             f"<b>Валюта:</b> {app['currency']}\n"
             f"<b>Сумма (валюта):</b> {app['amount_currency']}\n"
             f"<b>Сумма (UAH):</b> {app['amount_uah']}\n"
@@ -255,7 +373,7 @@ class AdminPanelHandler:
             f"<b>ФИО:</b> {app['fio']}\n"
             f"<b>ИНН:</b> <code>{app['inn']}</code>\n"
             f"<b>TRX адрес:</b> <code>{app['trx_address'] or 'Не указан'}</code>\n"
-            f"<b>Нужен TRX?:</b> {'Да' if app['needs_trx'] == '1' else 'Нет'}\n"
+            f"<b>Нужен TRX?:</b> {'Да' if app['needs_trx'] else 'Нет'}\n"
             f"<b>Хеш транзакции:</b> <code>{app['transaction_hash'] or 'Нет'}</code>\n"
             f"<b>Создана:</b> {app['created_at']}\n"
             f"<b>Обновлена:</b> {app['updated_at']}"
@@ -266,7 +384,7 @@ class AdminPanelHandler:
         await self.bot.config.save()
         logger.info(f"Admin {update.effective_user.id} updated the password.")
         await update.message.reply_text("✅ Пароль обновлён.")
-        return await self._show_main_menu(update)
+        return await self._show_main_menu(update, context)
 
     async def set_exchange_rate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
@@ -278,14 +396,14 @@ class AdminPanelHandler:
             await update.message.reply_text("✅ Курс обновлён.")
         except ValueError:
             await update.message.reply_text("❌ Ошибка: введите корректное число.")
-        return await self._show_main_menu(update)
+        return await self._show_main_menu(update, context)
 
     async def set_wallet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.bot.config.wallet_address = update.message.text.strip()
         await self.bot.config.save()
         logger.info(f"Admin {update.effective_user.id} updated the wallet address.")
         await update.message.reply_text("✅ Кошелёк обновлён.")
-        return await self._show_main_menu(update)
+        return await self._show_main_menu(update, context)
 
     async def set_support_contact(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_support = update.message.text.strip()
@@ -297,7 +415,7 @@ class AdminPanelHandler:
             await self.bot.config.save()
             logger.info(f"Admin {update.effective_user.id} updated the support contact.")
             await update.message.reply_text("✅ Контакт поддержки обновлён.")
-        return await self._show_main_menu(update)
+        return await self._show_main_menu(update, context)
 
     async def close(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
@@ -312,7 +430,7 @@ class AdminPanelHandler:
             entry_points=[CommandHandler('a', self.start)],
             states={
                 self.ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.check_password)],
-                self.ADMIN_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_|find_user_applications|restore_application')],
+                self.ADMIN_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_|find_user_applications|restore_application|change_status')],
                 self.SETTINGS_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_')],
                 self.SET_NEW_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_new_password)],
                 self.SET_EXCHANGE_RATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_exchange_rate)],
@@ -320,6 +438,8 @@ class AdminPanelHandler:
                 self.SET_SUPPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_support_contact)],
                 self.AWAIT_USER_FOR_APPS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.show_user_applications)],
                 self.AWAIT_REQUEST_ID_FOR_RESTORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.restore_application)],
+                self.AWAIT_REQUEST_ID_FOR_STATUS_CHANGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.show_status_selection_menu)],
+                self.SELECT_NEW_STATUS: [CallbackQueryHandler(self.process_status_change, pattern='^set_status_|admin_back_menu$')],
             },
             fallbacks=[CommandHandler('a', self.start), CommandHandler('ac', self.close)]
         )
