@@ -134,7 +134,7 @@ class DatabaseManager:
         query = '''
         SELECT * FROM exchange_requests 
         WHERE user_id = ? 
-        AND status NOT IN ('declined', 'completed')
+        AND status NOT IN ('declined', 'completed', 'funds sent')
         '''
         cursor = self._conn.cursor()
         cursor.execute(query, (user_id,))
@@ -147,14 +147,14 @@ class DatabaseManager:
             query = '''
             SELECT * FROM exchange_requests 
             WHERE username = ? 
-            AND status NOT IN ('declined', 'completed')
+            AND status NOT IN ('declined', 'completed', 'funds sent')
             '''
             # print(f"Fetching request for user ID: {user_id_or_login}\n {query}")
         else:
             query = '''
             SELECT * FROM exchange_requests 
             WHERE user_id = ? 
-            AND status NOT IN ('declined', 'completed')
+            AND status NOT IN ('declined', 'completed', 'funds sent'
             '''
         cursor = self._conn.cursor()
         cursor.execute(query, (user_id_or_login,))

@@ -60,8 +60,9 @@ class ExchangeHandler:
 
         check_request = self.check_if_request_exists(update, context)
         if check_request:
-            logger.info(f"User {user.id} ({user.username}) has already an active request.")
-            await update.message.reply_text(f"🚫 У вас уже есть активная заявка. \n\n 🛠️Если столкнулись с проблемой, напишите: @{self.bot.config.support_contact}")
+            logger.info(
+                f"User {user.id} ({user.username}) has already an active request({check_request['id']}).")
+            await update.message.reply_text(f"🚫 У вас уже есть активная заявка #{check_request['id']} в статусе: {self.translate_status(check_request['status'])}. \n\n 🛠️Если столкнулись с проблемой, напишите: {self.bot.config.support_contact}")
             return
         logger.info(f"User {user.id} ({user.username}) started the bot.")
         await self.main_menu(update, context)
@@ -367,7 +368,7 @@ class ExchangeHandler:
 
         base_admin_text, _ = self._prepare_admin_notification(request_data)
         final_admin_text = base_admin_text + \
-            f"\n\n✅2️⃣ Пользователь подтвердил перевод. Hash: `{submitted_hash}`"
+            f"\n\n✅2️⃣ Пользователь подтвердил перевод {request_data['amount_currency']} {request_data['currency']}. Hash: `{submitted_hash}`"
 
         admin_keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Средства получены",
@@ -465,6 +466,17 @@ class ExchangeHandler:
         updated_text += "\n\n✅4️⃣ Уведомление об отправке средств клиенту отправлено."
         await self._update_admin_messages(request_id, updated_text, None)
 
+    def translate_status(self, status: str) -> str:
+        translations = {
+            'awaiting payment': 'Ожидание оплаты клиентом',
+            'awaiting trx transfer': 'Ожидание перевода TRX клиенту',
+            'awaiting confirmation': 'Ожидание подтверждения перевода',
+            'payment received': 'Платёж от клиента получен',
+            'funds sent': 'Средства клиенту отправлены',
+            'declined': 'Отклонено'
+        }
+        return translations.get(status.lower(), status)
+
     async def handle_decline_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
@@ -545,7 +557,7 @@ class ExchangeHandler:
                                   f"💳 Реквизиты: `{card_info_safe}`\n"
                                   f"📇 ИНН: `{inn_safe}`\n\n")
 
-        title = f"📥 Заявка #{request_data['id']} (Статус: {request_data['status']})"
+        title = f"📥 Заявка #{request_data['id']} (Статус: {self.translate_status(request_data['status'])})"
 
         if request_data['needs_trx']:
             amount, sum_uah = request_data['amount_currency'], request_data['amount_uah']
