@@ -441,7 +441,7 @@ async def entering_trx_address(update: Update, context: ContextTypes.DEFAULT_TYP
         f"💳 Реквизиты карты: {context.user_data['card_info']}\n"
         f"🆔 ИНН: {inn}\n\n"
         f"⚡ Вам будет отправлено **15 USDT** в TRX для оплаты комиссии.\n\n"
-        f"💱 Сумма обмена с учетом TRX: {amount - 15} {currency} → {(amount - 15) * float(config['Settings']['exchange_rate']):.2f} UAH\n\n"
+        f"💱 Сумма обмена с учетом TRX: {amount} {currency} → {(amount) * float(config['Settings']['exchange_rate']):.2f} UAH\n\n"
         f"🔗 TRX-адрес: {trx_address}\n\n"
         "👉 Нажмите 'Отправить' для подтверждения.\n\n",
         reply_markup=InlineKeyboardMarkup(keyboard),
