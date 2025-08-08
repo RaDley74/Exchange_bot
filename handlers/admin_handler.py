@@ -79,7 +79,7 @@ class AdminPanelHandler:
 
     async def _show_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Displaying admin main menu for {update.effective_user.id}.")
-        
+
         is_enabled = self.bot.config.bot_enabled
         toggle_button_text = "🔴 Выключить бота" if is_enabled else "🟢 Включить бота"
         toggle_button = InlineKeyboardButton(toggle_button_text, callback_data='toggle_bot_status')
@@ -350,7 +350,7 @@ class AdminPanelHandler:
         return self.SETTINGS_MENU
 
     async def show_user_applications(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_input = update.message.text.strip().lower()
+        user_input = update.message.text.strip()
         admin_user = update.effective_user
         logger.info(f"Admin {admin_user.id} is searching for applications of user: {user_input}")
 
@@ -404,7 +404,8 @@ class AdminPanelHandler:
         self.bot.config.bot_enabled = new_status
         await self.bot.config.save()
 
-        logger.info(f"Admin {update.effective_user.id} changed bot status to: {'ENABLED' if new_status else 'DISABLED'}")
+        logger.info(
+            f"Admin {update.effective_user.id} changed bot status to: {'ENABLED' if new_status else 'DISABLED'}")
 
         # Даем обратную связь админу
         await query.answer(f"Бот теперь {'включен' if new_status else 'выключен'}.")
@@ -412,7 +413,6 @@ class AdminPanelHandler:
         # Обновляем меню, чтобы показать новое название кнопки
         return await self._show_main_menu(update, context)
 
-    
     async def set_exchange_rate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             new_rate = float(update.message.text.strip().replace(',', '.'))

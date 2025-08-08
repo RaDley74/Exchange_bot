@@ -149,16 +149,22 @@ class DatabaseManager:
             WHERE user_id = ? 
             AND status NOT IN ('declined', 'completed', 'funds sent', 'new')
             '''
+            cursor = self._conn.cursor()
+            cursor.execute(query, (user_id_or_login,))
         else:
-            user_id_or_login = user_id_or_login.replace("@", "").strip()
+            user_name = user_id_or_login.replace("@", "").strip()
+            # input(f"Fetching request for username: {user_name}")
+
             query = '''
             SELECT * FROM exchange_requests 
             WHERE username = ? 
             AND status NOT IN ('declined', 'completed', 'funds sent', 'new')
             '''
-        cursor = self._conn.cursor()
-        cursor.execute(query, (user_id_or_login,))
+            cursor = self._conn.cursor()
+            cursor.execute(query, (user_name,))
+            # input(f"Fetching request for username: {user_name}")
         # print(f"Fetching request for user ID or login: {cursor.fetchone()}")
+
         return cursor.fetchall()
 
     def update_request_status(self, request_id, status):
