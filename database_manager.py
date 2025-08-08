@@ -13,7 +13,7 @@ class DatabaseManager:
     Uses SQLite to store and retrieve exchange requests.
     """
 
-    def __init__(self, db_path='bot_database.db'):
+    def __init__(self, db_path=r'database/SafePay_bot.db'):
         """
         Initializes the database manager.
         :param db_path: Path to the SQLite database file.
