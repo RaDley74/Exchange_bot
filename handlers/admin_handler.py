@@ -6,7 +6,8 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ConversationHandler, ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 )
-
+from telegram.error import TelegramError
+import json
 logger = logging.getLogger(__name__)
 
 
@@ -121,7 +122,6 @@ class AdminPanelHandler:
 
         return self.ADMIN_MENU
 
-
     async def restore_application(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
         Handles the restoration of a deleted application message.
@@ -144,9 +144,12 @@ class AdminPanelHandler:
             await update.message.reply_text(f"❌ Заявка #{request_id} уже завершена или отклонена и не может быть восстановлена.")
             return await self._show_main_menu(update)
 
+        await self._delete_old_messages(request_data, context)
+
         try:
-            # Вызываем новый метод из exchange_handler
-            await self.bot.exchange_handler.resend_messages_for_request(request_id, context)
+            # Вызываем метод из exchange_handler, который пересоздаст сообщения
+            # context убран, он больше не нужен
+            await self.bot.exchange_handler.resend_messages_for_request(request_id)
             await update.message.reply_text(f"✅ Сообщения для заявки #{request_id} были успешно пересозданы для пользователя и администраторов.")
             logger.info(f"Successfully restored messages for request #{request_id}.")
         except Exception as e:
@@ -154,6 +157,37 @@ class AdminPanelHandler:
             logger.error(f"Failed to restore request #{request_id}: {e}", exc_info=True)
 
         return await self._show_main_menu(update)
+
+    async def _delete_old_messages(self, request_data: dict, context: ContextTypes.DEFAULT_TYPE):
+        """Safely deletes old messages related to a request for user and admins."""
+        logger.info(f"Attempting to delete old messages for request #{request_data['id']}.")
+
+        # Удаление сообщения пользователя
+        if request_data['user_message_id']:
+            try:
+                await context.bot.delete_message(
+                    chat_id=request_data['user_id'],
+                    message_id=request_data['user_message_id']
+                )
+                logger.info(
+                    f"Deleted old message {request_data['user_message_id']} for user {request_data['user_id']}.")
+            except TelegramError as e:
+                logger.warning(f"Could not delete message for user {request_data['user_id']}: {e}")
+
+        # Удаление сообщений администраторов
+        if request_data['admin_message_ids']:
+            try:
+                admin_message_ids = json.loads(request_data['admin_message_ids'])
+                for admin_id, message_id in admin_message_ids.items():
+                    try:
+                        await context.bot.delete_message(chat_id=admin_id, message_id=message_id)
+                        logger.info(f"Deleted old message {message_id} for admin {admin_id}.")
+                    except TelegramError as e:
+                        logger.warning(f"Could not delete message for admin {admin_id}: {e}")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.error(
+                    f"Failed to parse admin_message_ids for request #{request_data['id']}: {e}")
+
     async def _show_info(self, query):
         masked_password = '*' * len(self.bot.config.admin_password)
         admin_ids_str = ', '.join(map(str, self.bot.config.admin_ids))

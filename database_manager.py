@@ -65,6 +65,7 @@ class DatabaseManager:
             needs_trx BOOLEAN DEFAULT 0,
             transaction_hash TEXT,
             admin_message_ids TEXT,
+            user_message_id INTEGER, 
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );

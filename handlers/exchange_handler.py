@@ -267,7 +267,7 @@ class ExchangeHandler:
         # markdown parsing inside it. No manual escaping is needed here.
         wallet_address = self.bot.config.wallet_address
 
-        await query.edit_message_text(
+        msg = await query.edit_message_text(
             f"🙏 Спасибо за заявку #{request_id}!\n\n"
             f"💵 Сумма: {request_data['amount_currency']} {request_data['currency']} → {request_data['amount_uah']:.2f} UAH\n\n"
             f"🏦 Переведите средства на адрес:\n`{wallet_address}`\n\n"
@@ -275,10 +275,11 @@ class ExchangeHandler:
             parse_mode='Markdown', reply_markup=user_keyboard
         )
 
+        self.bot.db.update_request_data(request_id, {'user_message_id': msg.message_id})
         self.bot.db.update_request_status(request_id, 'awaiting payment')
         await self._send_admin_notification(request_id)
 
-    async def resend_messages_for_request(self, request_id: int, context: ContextTypes.DEFAULT_TYPE):
+    async def resend_messages_for_request(self, request_id: int):
         """
         Re-sends all relevant messages for a specific request to both the user and admins.
         This is used to restore accidentally deleted messages.
@@ -291,6 +292,7 @@ class ExchangeHandler:
         user_id = request_data['user_id']
         user_text = None
         user_keyboard = None
+        new_user_message_id = None
 
         # 1. Определяем, какое сообщение отправить пользователю на основе статуса
         if status == 'awaiting trx transfer':
@@ -332,19 +334,24 @@ class ExchangeHandler:
         # Отправляем сообщение пользователю, если оно было сформировано
         if user_text:
             try:
-                await context.bot.send_message(
+                # >>> Используем self.bot.application.bot вместо context.bot <<<
+                msg = await self.bot.application.bot.send_message(
                     chat_id=user_id,
                     text=user_text,
                     reply_markup=user_keyboard,
                     parse_mode='Markdown'
                 )
+                new_user_message_id = msg.message_id
             except Exception as e:
                 logger.error(
                     f"Could not send restoration message to user {user_id} for request #{request_id}: {e}")
 
         # 2. Пересоздаем сообщение для администраторов
-        # Этот метод отправит новые сообщения и обновит их ID в базе данных
         await self._send_admin_notification(request_id, is_restoration=True)
+
+        # 3. Обновляем ID сообщения пользователя в БД, если оно было отправлено
+        if new_user_message_id:
+            self.bot.db.update_request_data(request_id, {'user_message_id': new_user_message_id})
 
     async def confirming_exchange_trx(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -463,7 +470,7 @@ class ExchangeHandler:
             InlineKeyboardButton("✅ Я совершил(а) перевод",
                                  callback_data=f"user_confirms_sending_{request_id}")
         ]])
-        await context.bot.send_message(
+        msg = await context.bot.send_message(
             chat_id=request_data['user_id'],
             text=(f"✅ Перевод TRX выполнен для заявки #{request_id}.\n\n"
                   f"📥 Переведите {(request_data['amount_currency'] - 15):.2f} {request_data['currency']} на кошелек:\n"
@@ -471,7 +478,7 @@ class ExchangeHandler:
                   "После перевода нажмите кнопку ниже."),
             reply_markup=keyboard, parse_mode='Markdown'
         )
-
+        self.bot.db.update_request_data(request_id, {'user_message_id': msg.message_id})
         self.bot.db.update_request_status(request_id, 'awaiting payment')
 
         updated_text, _ = self._prepare_admin_notification(request_data)
@@ -490,8 +497,9 @@ class ExchangeHandler:
         if not request_data:
             return
 
-        await context.bot.send_message(chat_id=request_data['user_id'], text=f"✅ Средства по заявке #{request_id} получены.\n\n⏳ Ожидайте перевода.")
+        msg = await context.bot.send_message(chat_id=request_data['user_id'], text=f"✅ Средства по заявке #{request_id} получены.\n\n⏳ Ожидайте перевода.")
 
+        self.bot.db.update_request_data(request_id, {'user_message_id': msg.message_id})
         self.bot.db.update_request_status(request_id, 'payment received')
 
         updated_text, _ = self._prepare_admin_notification(
@@ -518,7 +526,7 @@ class ExchangeHandler:
             [InlineKeyboardButton("✅ Подтвердить получение средств",
                                   callback_data=f"by_user_confirm_transfer_{request_id}")]
         ])
-        await context.bot.send_message(
+        msg = await context.bot.send_message(
             chat_id=request_data['user_id'],
             text=f"✅ Перевод средств по заявке #{request_id} вам выполнен успешно. 💸\n\n"
             "🙏 Спасибо за использование нашего сервиса! 🤝\n\n"
@@ -526,6 +534,7 @@ class ExchangeHandler:
             reply_markup=keyboard, parse_mode='Markdown'
         )
 
+        self.bot.db.update_request_data(request_id, {'user_message_id': msg.message_id})
         self.bot.db.update_request_status(request_id, 'funds sent')
 
         updated_text, _ = self._prepare_admin_notification(
