@@ -128,9 +128,9 @@ class DatabaseManager:
         # row = cursor.fetchone()
         # print(f"Fetching request with ID: {dict(row)}")
         return cursor.fetchone()
-    
+
     def get_request_by_user_id(self, user_id):
-   
+
         query = '''
         SELECT * FROM exchange_requests 
         WHERE user_id = ? 
@@ -138,8 +138,28 @@ class DatabaseManager:
         '''
         cursor = self._conn.cursor()
         cursor.execute(query, (user_id,))
- 
+
         return cursor.fetchone()
+
+    def get_request_by_user_id_or_login(self, user_id_or_login):
+        if "@" in user_id_or_login:
+            user_id_or_login = user_id_or_login.replace("@", "").strip()
+            query = '''
+            SELECT * FROM exchange_requests 
+            WHERE username = ? 
+            AND status NOT IN ('declined', 'completed')
+            '''
+            # print(f"Fetching request for user ID: {user_id_or_login}\n {query}")
+        else:
+            query = '''
+            SELECT * FROM exchange_requests 
+            WHERE user_id = ? 
+            AND status NOT IN ('declined', 'completed')
+            '''
+        cursor = self._conn.cursor()
+        cursor.execute(query, (user_id_or_login,))
+        # print(f"Fetching request for user ID or login: {cursor.fetchone()}")
+        return cursor.fetchall()
 
     def update_request_status(self, request_id, status):
         """Updates the status of a request."""

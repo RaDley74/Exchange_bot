@@ -150,21 +150,18 @@ class AdminPanelHandler:
 
         # --- Начало симуляции данных ---
         # В реальном приложении здесь будет запрос к вашей базе данных
-        # Пример: applications = await db.get_active_applications_by_user(user_input)
-        mock_data_string = "1,349988626,radley74,awaiting_confirmation,USDT,123.0,3813.0,123,123,123,123,,0,123,{},2025-08-07 10:12:24,2025-08-07 10:12:45"
+        # print(f"Mock data for user '{user_input}': {mock_data_dict}")
 
+        # input(f"Press Enter to continue...")  # Для отладки, чтобы увидеть данные в консоли
         # Предполагаем, что у пользователя может быть несколько заявок
-        all_applications_mock = [self._parse_application_data(mock_data_string)]
-
-        found_apps = [
-            app for app in all_applications_mock
-            if user_input == str(app['user_id']) or user_input == app['username'].lower()
-        ]
+        all_applications = self.bot.db.get_request_by_user_id_or_login(user_input)
+        logger.info(f"Mock applications for user '{user_input}': {all_applications}")
+        # input(f"Press Enter to continue...")  # Для отладки, чтобы увидеть данные в консоли
         # --- Конец симуляции данных ---
 
-        if found_apps:
-            await update.message.reply_text(f"✅ Найдены активные заявки ({len(found_apps)} шт.):")
-            for app in found_apps:
+        if all_applications:
+            await update.message.reply_text(f"✅ Найдены активные заявки ({len(all_applications)} шт.):")
+            for app in all_applications:
                 response_text = self._format_application_info(app)
                 await update.message.reply_text(response_text, parse_mode='HTML')
         else:
@@ -172,30 +169,7 @@ class AdminPanelHandler:
 
         return await self._show_main_menu(update)
 
-    def _parse_application_data(self, data_string: str) -> dict:
-        """Парсит строку с данными о заявке в словарь."""
-        parts = data_string.split(',')
-        return {
-            'id': parts[0],
-            'user_id': int(parts[1]),
-            'username': parts[2],
-            'status': parts[3],
-            'currency': parts[4],
-            'amount_currency': float(parts[5]),
-            'amount_uah': float(parts[6]),
-            'bank_name': parts[7],
-            'card_info': parts[8],
-            'fio': parts[9],
-            'inn': parts[10],
-            'trx_address': parts[11],
-            'needs_trx': parts[12],
-            'transaction_hash': parts[13],
-            'admin_message_ids': parts[14],
-            'created_at': parts[15],
-            'updated_at': parts[16]
-        }
-
-    def _format_application_info(self, app: dict) -> str:
+    def _format_application_info(self, app) -> str:
         """Форматирует информацию о заявке для вывода."""
         return (
             f"<b>Заявка ID:</b> <code>{app['id']}</code>\n"
