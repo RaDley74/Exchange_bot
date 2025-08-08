@@ -55,7 +55,8 @@ class ConfigManager:
             'EXCHANGE_RATE': 'your_exchange_rate_here',
             'ADMIN_PASSWORD': 'your_admin_password_here',
             'WALLET_ADDRESS': 'your_wallet_address_here',
-            'SUPPORT_CONTACT': 'your_support_contact_here'
+            'SUPPORT_CONTACT': 'your_support_contact_here', 
+            'BOT_ENABLED': 'True'
         }
 
     def _save_sync(self):
@@ -110,7 +111,7 @@ class ConfigManager:
 
     @admin_password.setter
     def admin_password(self, value: str):
-        self.set('Settings', 'admin_password', value)
+        self.set('Settings', 'ADMIN_PASSWORD', value)
 
     @property
     def exchange_rate(self) -> float:
@@ -118,7 +119,7 @@ class ConfigManager:
 
     @exchange_rate.setter
     def exchange_rate(self, value: float):
-        self.set('Settings', 'exchange_rate', value)
+        self.set('Settings', 'EXCHANGE_RATE', str(value))
 
     @property
     def wallet_address(self) -> str:
@@ -126,7 +127,7 @@ class ConfigManager:
 
     @wallet_address.setter
     def wallet_address(self, value: str):
-        self.set('Settings', 'wallet_address', value)
+        self.set('Settings', 'WALLET_ADDRESS', value)
 
     @property
     def support_contact(self) -> str:
@@ -134,4 +135,14 @@ class ConfigManager:
 
     @support_contact.setter
     def support_contact(self, value: str):
-        self.set('Settings', 'support_contact', value)
+        self.set('Settings', 'SUPPORT_CONTACT', value)
+
+    @property
+    def bot_enabled(self) -> bool:
+        """Returns True if the bot is enabled, False otherwise."""
+        return self.get('Settings', 'BOT_ENABLED', 'True') == 'True'
+
+    @bot_enabled.setter
+    def bot_enabled(self, value: bool):
+        """Sets the bot's enabled status."""
+        self.set('Settings', 'BOT_ENABLED', str(value))

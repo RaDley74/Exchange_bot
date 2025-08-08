@@ -55,6 +55,9 @@ class ExchangeHandler:
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not self.bot.config.bot_enabled:
+            await update.message.reply_text("🔧🤖 Бот на техническом обслуживании. \n\n⏳ Пожалуйста, попробуйте позже.")
+            return
         """Handles the /start command when there is no active conversation."""
         user = update.effective_user
 
@@ -75,6 +78,9 @@ class ExchangeHandler:
     async def cancel_and_restart(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Ends the current conversation and shows the main menu."""
         user = update.effective_user
+        if not self.bot.config.bot_enabled:
+            await update.message.reply_text("🔧🤖 Бот на техническом обслуживании. \n\n⏳ Пожалуйста, попробуйте позже.")
+            return
         logger.info(
             f"User {user.id} ({user.username}) used /start to cancel or restart the conversation.")
         await self.main_menu(update, context)
@@ -295,7 +301,7 @@ class ExchangeHandler:
         # Determine the user message based on the current status
         if status == 'awaiting trx transfer':
             user_text = f"🙏 Спасибо за заявку #{request_id}!\n\n" \
-                "🏦 Ожидайте сообщения от бота об успешном переводе TRX ✅"
+                "🏦 Ожидайте сообщения об успешном переводе TRX ✅"
         elif status == 'awaiting payment':
             amount_display = request_data['amount_currency']
             message_intro = f"🙏 Спасибо за заявку #{request_id}!\n\n"
@@ -402,7 +408,7 @@ class ExchangeHandler:
 
             msg = await query.message.chat.send_message(
                 f"🙏 Спасибо за заявку #{request_id}!\n\n"
-                "🏦 Ожидайте сообщения от бота об успешном переводе TRX ✅",
+                "🏦 Ожидайте сообщения об успешном переводе TRX ✅",
                 parse_mode='Markdown'
             )
 

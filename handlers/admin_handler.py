@@ -79,6 +79,11 @@ class AdminPanelHandler:
 
     async def _show_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Displaying admin main menu for {update.effective_user.id}.")
+        
+        is_enabled = self.bot.config.bot_enabled
+        toggle_button_text = "🔴 Выключить бота" if is_enabled else "🟢 Включить бота"
+        toggle_button = InlineKeyboardButton(toggle_button_text, callback_data='toggle_bot_status')
+
         keyboard = [
             [
                 InlineKeyboardButton("📊 Информация", callback_data='admin_info'),
@@ -91,6 +96,7 @@ class AdminPanelHandler:
             [
                 InlineKeyboardButton("🔧 Изменить статус", callback_data='change_status'),
             ],
+            [toggle_button],  # Добавили кнопку
         ]
         text = "⚙️ Админ-панель"
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -148,6 +154,8 @@ class AdminPanelHandler:
         elif data == 'change_status':
             await query.edit_message_text("Введите ID заявки для изменения статуса:")
             return self.AWAIT_REQUEST_ID_FOR_STATUS_CHANGE
+        elif data == 'toggle_bot_status':
+            return await self.toggle_bot_status(update, context)
 
         return self.ADMIN_MENU
 
@@ -386,6 +394,25 @@ class AdminPanelHandler:
         await update.message.reply_text("✅ Пароль обновлён.")
         return await self._show_main_menu(update, context)
 
+    async def toggle_bot_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Toggles the bot's enabled/disabled status."""
+        query = update.callback_query
+
+        current_status = self.bot.config.bot_enabled
+        new_status = not current_status
+
+        self.bot.config.bot_enabled = new_status
+        await self.bot.config.save()
+
+        logger.info(f"Admin {update.effective_user.id} changed bot status to: {'ENABLED' if new_status else 'DISABLED'}")
+
+        # Даем обратную связь админу
+        await query.answer(f"Бот теперь {'включен' if new_status else 'выключен'}.")
+
+        # Обновляем меню, чтобы показать новое название кнопки
+        return await self._show_main_menu(update, context)
+
+    
     async def set_exchange_rate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             new_rate = float(update.message.text.strip().replace(',', '.'))
@@ -430,7 +457,7 @@ class AdminPanelHandler:
             entry_points=[CommandHandler('a', self.start)],
             states={
                 self.ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.check_password)],
-                self.ADMIN_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_|find_user_applications|restore_application|change_status')],
+                self.ADMIN_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_|find_user_applications|restore_application|change_status|toggle_bot_status')],
                 self.SETTINGS_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_')],
                 self.SET_NEW_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_new_password)],
                 self.SET_EXCHANGE_RATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_exchange_rate)],
