@@ -253,7 +253,7 @@ class ExchangeHandler:
             return ConversationHandler.END
         return ConversationHandler.END
 
-    async def _process_standard_exchange(self, query: Update.callback_query, context: ContextTypes.DEFAULT_TYPE, request_id: int):
+    async def _process_standard_exchange(self, query: Update, context: ContextTypes.DEFAULT_TYPE, request_id: int):
         user = query.from_user
         request_data = self.bot.db.get_request_by_id(request_id)
         logger.info(f"Creating a standard exchange request ({request_id}) for user {user.id}.")
