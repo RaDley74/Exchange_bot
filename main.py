@@ -257,7 +257,7 @@ async def entering_inn_details(update: Update, context: ContextTypes.DEFAULT_TYP
     bank_name = context.user_data['bank_name']
     keyboard = [
         [InlineKeyboardButton("✅ Отправить", callback_data='send_exchange')],
-        # [InlineKeyboardButton("🚀 Получить TRX", callback_data='send_exchange_trx')],
+        [InlineKeyboardButton("🚀 Получить TRX", callback_data='send_exchange_trx')],
         [InlineKeyboardButton("❌ Отмена", callback_data='back_to_menu')]
     ]
 
@@ -267,8 +267,8 @@ async def entering_inn_details(update: Update, context: ContextTypes.DEFAULT_TYP
         f"👤 ФИО: `{fio}`\n"
         f"💳 Реквизиты карты: `{context.user_data['card_info']}`\n"
         f"🆔 ИНН: `{inn}`\n\n"
-        "👉 Нажмите 'Отправить' для подтверждения.\n\n",
-        # "⚡ В случае если вам нужен TRX, нажмите соответствующую кнопку.",
+        "👉 Нажмите 'Отправить' для подтверждения.\n\n"
+        "⚡ В случае если вам нужен TRX, нажмите соответствующую кнопку.",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
@@ -436,12 +436,12 @@ async def entering_trx_address(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(
         f"📋 Ваша информация:\n\n"
         f"💰 Обмен: {amount} {currency} → {sum_uah:.2f} UAH\n\n"
+        f"⚡ Вам будет отправлено **15 USDT** в TRX для оплаты комиссии.\n\n"
+        f"💱 Сумма которую вы получите на карту с учетом вычета TRX: {amount - 15} {currency} → {(amount - 15) * float(config['Settings']['exchange_rate']):.2f} UAH\n\n"
         f"🏦 Банк: {bank_name}\n"
         f"👤 ФИО: {fio}\n"
         f"💳 Реквизиты карты: {context.user_data['card_info']}\n"
         f"🆔 ИНН: {inn}\n\n"
-        f"⚡ Вам будет отправлено **15 USDT** в TRX для оплаты комиссии.\n\n"
-        f"💱 Сумма обмена с учетом TRX: {amount} {currency} → {(amount) * float(config['Settings']['exchange_rate']):.2f} UAH\n\n"
         f"🔗 TRX-адрес: {trx_address}\n\n"
         "👉 Нажмите 'Отправить' для подтверждения.\n\n",
         reply_markup=InlineKeyboardMarkup(keyboard),
@@ -492,6 +492,7 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
             f"🙏 Спасибо за заявку!\n\n"
             f"💰 Из общей суммы {amount:.2f} {currency}, вам будет отправлено **15 USDT** в TRX для оплаты комиссии.\n\n"
             f"💵 Конечная сумма обмена: {amount} {currency} = {(amount) * float(config['Settings']['exchange_rate']):.2f} UAH\n\n"
+            f"💱 Сумма которую вы получите на карту с учетом вычета TRX: {amount - 15} {currency} → {(amount - 15) * float(config['Settings']['exchange_rate']):.2f} UAH\n\n"
             f"🏦 Ожидайте, сообщения от бота о успешном переводе TRX ✅\n",
             parse_mode='Markdown'
         )
@@ -511,7 +512,7 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
         text_for_admin = (
             f"📥 Новая заявка на обмен\n\n"
             f"💱 {amount} {currency} = {sum_uah:.2f} UAH\n\n"
-            f"💵 После вычета TRX: {amount} {currency} → {((amount) * float(config['Settings']['exchange_rate'])):.2f} UAH\n\n"
+            f"💵 После вычета TRX: {amount - 15} {currency} → {((amount - 15) * float(config['Settings']['exchange_rate'])):.2f} UAH\n\n"
             f"{user_info}"
             f"{transfer_info}"
         )
@@ -573,7 +574,7 @@ async def handle_transfer_confirmation_trx(update: Update, context: ContextTypes
             chat_id=user_id,
             text=(
                 f"✅ Перевод TRX выполнен. \n\n"
-                f"📥 Переведите {(amount - 15):.2f} {currency} на кошелек:\n"
+                f"📥 Переведите {(amount):.2f} {currency} на кошелек:\n"
                 f"`{config['Settings']['wallet_address']}`\n\n"
                 "После совершения перевода, нажмите кнопку ниже, чтобы предоставить хэш транзакции."
             ),
