@@ -389,8 +389,8 @@ class ExchangeHandler:
         await update.message.reply_text(
             f"📋 Ваша информация:\n\n"
             f"💰 Обмен: {amount} {context.user_data['currency']} → {context.user_data['sum_uah']:.2f} UAH\n"
+            f"💱 Сумма которую вы получите на карту с учетом вычета TRX: {final_amount} {context.user_data['currency']} → {final_sum_uah:.2f} UAH\n\n"
             f"⚡ Вам будет отправлено **15 USDT** в TRX.\n\n"
-            f"💱 Итоговая сумма обмена: {final_amount} {context.user_data['currency']} → {final_sum_uah:.2f} UAH\n\n"
             f"🔗 TRX-адрес: {trx_address}\n\n👉 Нажмите 'Отправить' для подтверждения.",
             reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown'
         )
@@ -478,7 +478,7 @@ class ExchangeHandler:
         msg = await context.bot.send_message(
             chat_id=request_data['user_id'],
             text=(f"✅ Перевод TRX выполнен для заявки #{request_id}.\n\n"
-                  f"📥 Переведите {(request_data['amount_currency'] - 15):.2f} {request_data['currency']} на кошелек:\n"
+                  f"📥 Переведите {(request_data['amount_currency']):.2f} {request_data['currency']} на кошелек:\n"
                   f"`{self.bot.config.wallet_address}`\n\n"
                   "После перевода нажмите кнопку ниже."),
             reply_markup=keyboard, parse_mode='Markdown'
