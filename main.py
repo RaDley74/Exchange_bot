@@ -491,7 +491,7 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
         await query.message.chat.send_message(
             f"🙏 Спасибо за заявку!\n\n"
             f"💰 Из общей суммы {amount:.2f} {currency}, вам будет отправлено **15 USDT** в TRX для оплаты комиссии.\n\n"
-            f"💵 Конечная сумма обмена: {amount-15} {currency} = {(amount-15) * float(config['Settings']['exchange_rate']):.2f} UAH\n\n"
+            f"💵 Конечная сумма обмена: {amount} {currency} = {(amount) * float(config['Settings']['exchange_rate']):.2f} UAH\n\n"
             f"🏦 Ожидайте, сообщения от бота о успешном переводе TRX ✅\n",
             parse_mode='Markdown'
         )
@@ -511,7 +511,7 @@ async def final_confirming_exchange_trx(update: Update, context: ContextTypes.DE
         text_for_admin = (
             f"📥 Новая заявка на обмен\n\n"
             f"💱 {amount} {currency} = {sum_uah:.2f} UAH\n\n"
-            f"💵 После вычета TRX: {amount-15} {currency} → {((amount-15) * float(config['Settings']['exchange_rate'])):.2f} UAH\n\n"
+            f"💵 После вычета TRX: {amount} {currency} → {((amount) * float(config['Settings']['exchange_rate'])):.2f} UAH\n\n"
             f"{user_info}"
             f"{transfer_info}"
         )
