@@ -23,8 +23,9 @@ class AdminPanelHandler:
         SET_EXCHANGE_RATE,
         SET_WALLET,
         SET_SUPPORT,
-        AWAIT_USER_FOR_APPS,  # Новое состояние для ожидания ввода пользователя
-    ) = range(8)
+        AWAIT_USER_FOR_APPS,
+        AWAIT_REQUEST_ID_FOR_RESTORE,
+    ) = range(9)
 
     def __init__(self, bot_instance):
         """
@@ -69,6 +70,7 @@ class AdminPanelHandler:
             ],
             [
                 InlineKeyboardButton("🔍 Найти заявки", callback_data='find_user_applications'),
+                InlineKeyboardButton("🔄 Восстановить заявку", callback_data='restore_application'),
             ],
         ]
         text = "⚙️ Админ-панель"
@@ -113,9 +115,45 @@ class AdminPanelHandler:
         elif data == 'find_user_applications':
             await query.edit_message_text("Введите ID аккаунта или login телеграм для поиска активных заявок:")
             return self.AWAIT_USER_FOR_APPS
+        elif data == 'restore_application':
+            await query.edit_message_text("Введите ID заявки, которую нужно восстановить:")
+            return self.AWAIT_REQUEST_ID_FOR_RESTORE
 
         return self.ADMIN_MENU
 
+
+    async def restore_application(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handles the restoration of a deleted application message.
+        """
+        admin_user = update.effective_user
+        try:
+            request_id = int(update.message.text.strip())
+        except (ValueError, TypeError):
+            await update.message.reply_text("❌ ID заявки должен быть числом. Попробуйте снова.")
+            return self.AWAIT_REQUEST_ID_FOR_RESTORE
+
+        logger.info(f"Admin {admin_user.id} attempts to restore request #{request_id}.")
+
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            await update.message.reply_text(f"❌ Заявка с ID #{request_id} не найдена.")
+            return await self._show_main_menu(update)
+
+        if request_data['status'] in ['completed', 'declined']:
+            await update.message.reply_text(f"❌ Заявка #{request_id} уже завершена или отклонена и не может быть восстановлена.")
+            return await self._show_main_menu(update)
+
+        try:
+            # Вызываем новый метод из exchange_handler
+            await self.bot.exchange_handler.resend_messages_for_request(request_id, context)
+            await update.message.reply_text(f"✅ Сообщения для заявки #{request_id} были успешно пересозданы для пользователя и администраторов.")
+            logger.info(f"Successfully restored messages for request #{request_id}.")
+        except Exception as e:
+            await update.message.reply_text(f"🚫 Произошла ошибка при восстановлении заявки: {e}")
+            logger.error(f"Failed to restore request #{request_id}: {e}", exc_info=True)
+
+        return await self._show_main_menu(update)
     async def _show_info(self, query):
         masked_password = '*' * len(self.bot.config.admin_password)
         admin_ids_str = ', '.join(map(str, self.bot.config.admin_ids))
@@ -240,13 +278,14 @@ class AdminPanelHandler:
             entry_points=[CommandHandler('a', self.start)],
             states={
                 self.ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.check_password)],
-                self.ADMIN_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_|find_user_applications')],
+                self.ADMIN_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_|find_user_applications|restore_application')],
                 self.SETTINGS_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_')],
                 self.SET_NEW_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_new_password)],
                 self.SET_EXCHANGE_RATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_exchange_rate)],
                 self.SET_WALLET: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_wallet)],
                 self.SET_SUPPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_support_contact)],
                 self.AWAIT_USER_FOR_APPS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.show_user_applications)],
+                self.AWAIT_REQUEST_ID_FOR_RESTORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.restore_application)],
             },
             fallbacks=[CommandHandler('a', self.start), CommandHandler('ac', self.close)]
         )

@@ -278,6 +278,74 @@ class ExchangeHandler:
         self.bot.db.update_request_status(request_id, 'awaiting payment')
         await self._send_admin_notification(request_id)
 
+    async def resend_messages_for_request(self, request_id: int, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Re-sends all relevant messages for a specific request to both the user and admins.
+        This is used to restore accidentally deleted messages.
+        """
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            raise ValueError(f"Request with ID {request_id} not found in database.")
+
+        status = request_data['status']
+        user_id = request_data['user_id']
+        user_text = None
+        user_keyboard = None
+
+        # 1. Определяем, какое сообщение отправить пользователю на основе статуса
+        if status == 'awaiting trx transfer':
+            user_text = f"🙏 Спасибо за заявку #{request_id}!\n\n" \
+                "🏦 Ожидайте сообщения от бота об успешном переводе TRX ✅"
+
+        elif status == 'awaiting payment':
+            amount_display = request_data['amount_currency']
+            if request_data['needs_trx']:
+                amount_display -= 15  # Вычитаем комиссию за TRX
+
+            user_text = f"✅ Перевод TRX выполнен для заявки #{request_id}.\n\n" if request_data['needs_trx'] else \
+                f"🙏 Спасибо за заявку #{request_id}!\n\n" \
+                f"💵 Сумма: {request_data['amount_currency']} {request_data['currency']} → {request_data['amount_uah']:.2f} UAH\n\n"
+
+            user_text += f"📥 Переведите {amount_display:.2f} {request_data['currency']} на кошелек:\n" \
+                f"`{self.bot.config.wallet_address}`\n\n" \
+                "После перевода нажмите кнопку ниже для предоставления хэша."
+            user_keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Я совершил(а) перевод",
+                                     callback_data=f"user_confirms_sending_{request_id}")
+            ]])
+
+        elif status == 'awaiting confirmation':
+            user_text = "✅ Спасибо, ваш хэш получен и отправлен на проверку."
+
+        elif status == 'payment received':
+            user_text = f"✅ Средства по заявке #{request_id} получены.\n\n⏳ Ожидайте перевода."
+
+        elif status == 'funds sent':
+            user_text = f"✅ Перевод средств по заявке #{request_id} вам выполнен успешно. 💸\n\n" \
+                "🙏 Спасибо за использование нашего сервиса! 🤝\n\n" \
+                "Пожалуйста, подтвердите получение средств."
+            user_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Подтвердить получение средств",
+                                      callback_data=f"by_user_confirm_transfer_{request_id}")]
+            ])
+
+        # Отправляем сообщение пользователю, если оно было сформировано
+        if user_text:
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=user_text,
+                    reply_markup=user_keyboard,
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                logger.error(
+                    f"Could not send restoration message to user {user_id} for request #{request_id}: {e}")
+
+        # 2. Пересоздаем сообщение для администраторов
+        # Этот метод отправит новые сообщения и обновит их ID в базе данных
+        await self._send_admin_notification(request_id, is_restoration=True)
+
     async def confirming_exchange_trx(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
@@ -475,7 +543,7 @@ class ExchangeHandler:
             'funds sent': 'Средства клиенту отправлены',
             'declined': 'Отклонено'
         }
-        return translations.get(status.lower(), status)
+        return status if status.lower() not in translations else translations[status.lower()]
 
     async def handle_decline_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -584,8 +652,11 @@ class ExchangeHandler:
             ]])
         return text, keyboard
 
-    async def _send_admin_notification(self, request_id):
-        """Sends notifications to all administrators."""
+    async def _send_admin_notification(self, request_id, is_restoration=False):
+        """
+        Sends notifications to all administrators.
+        If is_restoration is True, it regenerates messages based on the current state.
+        """
         admin_ids = self.bot.config.admin_ids
         if not admin_ids:
             return
@@ -594,7 +665,36 @@ class ExchangeHandler:
         if not request_data:
             return
 
+        # >>> МОДИФИКАЦИЯ: готовим сообщение и клавиатуру в зависимости от статуса <<<
         text, keyboard = self._prepare_admin_notification(request_data)
+        status = request_data['status']
+
+        # Дополняем текст и кнопки в соответствии с текущим этапом заявки
+        if status == 'awaiting confirmation':
+            text += f"\n\n✅2️⃣ Пользователь подтвердил перевод. Hash: `{request_data['transaction_hash']}`"
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Средства получены",
+                                     callback_data=f"confirm_payment_{request_id}"),
+                InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
+            ]])
+        elif status == 'payment received':
+            text += f"\n\n✅ Хэш: `{request_data['transaction_hash']}`"
+            text += f"\n\n✅3️⃣ Уведомление о получении средств отправлено."
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Перевод клиенту сделан",
+                                     callback_data=f"confirm_transfer_{request_id}"),
+                InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
+            ]])
+        elif status == 'funds sent':
+            text += f"\n\n✅ Хэш: `{request_data['transaction_hash']}`"
+            text += "\n\n✅4️⃣ Уведомление об отправке средств клиенту отправлено."
+            keyboard = None  # На этом этапе у админа нет кнопок
+        elif status == 'awaiting trx transfer' and is_restoration:  # Для статуса когда админ должен перевести TRX
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ TRX переведено",
+                                     callback_data=f"confirm_trx_transfer_{request_id}"),
+                InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
+            ]])
 
         admin_message_ids = {}
 

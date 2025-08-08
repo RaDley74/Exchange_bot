@@ -17,6 +17,7 @@ from handlers.exchange_handler import ExchangeHandler
 # --- Logging Setup ---
 
 os.makedirs("log", exist_ok=True)
+os.makedirs("database", exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
