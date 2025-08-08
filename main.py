@@ -257,7 +257,7 @@ async def entering_inn_details(update: Update, context: ContextTypes.DEFAULT_TYP
     bank_name = context.user_data['bank_name']
     keyboard = [
         [InlineKeyboardButton("✅ Отправить", callback_data='send_exchange')],
-        [InlineKeyboardButton("🚀 Получить TRX", callback_data='send_exchange_trx')],
+        # [InlineKeyboardButton("🚀 Получить TRX", callback_data='send_exchange_trx')],
         [InlineKeyboardButton("❌ Отмена", callback_data='back_to_menu')]
     ]
 
@@ -267,8 +267,8 @@ async def entering_inn_details(update: Update, context: ContextTypes.DEFAULT_TYP
         f"👤 ФИО: `{fio}`\n"
         f"💳 Реквизиты карты: `{context.user_data['card_info']}`\n"
         f"🆔 ИНН: `{inn}`\n\n"
-        "👉 Нажмите 'Отправить' для подтверждения.\n\n"
-        "⚡ В случае если вам нужен TRX, нажмите соответствующую кнопку.",
+        "👉 Нажмите 'Отправить' для подтверждения.\n\n",
+        # "⚡ В случае если вам нужен TRX, нажмите соответствующую кнопку.",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
