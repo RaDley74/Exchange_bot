@@ -205,7 +205,7 @@ class ExchangeHandler:
             return self.ENTERING_FIO_DETAILS
 
         context.user_data['fio'] = fio
-        await update.message.reply_text(f"👤 Вы указали ФИО: {fio}\n\n🆔 Пожалуйста, введите ИНН:")
+        await update.message.reply_text(f"👤 Вы указали ФИО: {fio}\n\n🆔 Пожалуйста, введите ІПН/ЄДРПОУ:")
         return self.ENTERING_INN_DETAILS
 
     async def entering_inn_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -230,7 +230,7 @@ class ExchangeHandler:
             f"👤 ФИО: `{context.user_data['fio']}`\n"
             f"💳 IBAN: `{context.user_data['card_info']}`\n"
             f"🔢 Номер карты: `{context.user_data['card_number']}`\n"
-            f"🆔 ИНН: `{inn}`\n\n"
+            f"🆔 ІПН/ЄДРПОУ: `{inn}`\n\n"
             "👉 Нажмите 'Отправить' для подтверждения или 'Получить TRX', если вам нужен TRX для комиссии.",
             reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown'
         )
