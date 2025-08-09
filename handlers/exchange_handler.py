@@ -630,6 +630,7 @@ class ExchangeHandler:
         # if request_data['username']:
         #     username_display = request_data['username'].replace('_', '\\_').replace(
         #         '*', '\\*').replace('`', '\\`').replace('[', '\\[')
+        username_display = request_data['username']
 
         def sanitize_for_code_block(text):
             return str(text).replace('`', "'") if text else ""
