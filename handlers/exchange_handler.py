@@ -20,10 +20,10 @@ class ExchangeHandler:
     # Conversation states are defined as class attributes for clarity
     (
         CHOOSING_CURRENCY, ENTERING_AMOUNT, ENTERING_BANK_NAME, ENTERING_CARD_DETAILS,
-        ENTERING_FIO_DETAILS, ENTERING_INN_DETAILS, CONFIRMING_EXCHANGE,
+        ENTERING_CARD_NUMBER, ENTERING_FIO_DETAILS, ENTERING_INN_DETAILS, CONFIRMING_EXCHANGE,
         CONFIRMING_EXCHANGE_TRX, ENTERING_TRX_ADDRESS, FINAL_CONFIRMING_EXCHANGE_TRX,
         ENTERING_HASH,
-    ) = range(11)
+    ) = range(12)
 
     def __init__(self, bot_instance):
         """
@@ -174,18 +174,28 @@ class ExchangeHandler:
         context.user_data['bank_name'] = bank_name
         logger.info(f"User {update.effective_user.id} entered bank: {bank_name}")
         await update.message.reply_text(
-            f"🏦 Вы указали банк: {bank_name}\n\n💳 Введите Iban:"
+            f"🏦 Вы указали банк: {bank_name}\n\n💳 Введите IBAN:"
         )
         return self.ENTERING_CARD_DETAILS
 
     async def entering_card_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         card_info = update.message.text.strip()
         if not card_info:
-            await update.message.reply_text("Пожалуйста, введите корректные реквизиты.")
+            await update.message.reply_text("Пожалуйста, введите корректный IBAN.")
             return self.ENTERING_CARD_DETAILS
 
         context.user_data['card_info'] = card_info
-        await update.message.reply_text(f"💳 Вы указали реквизиты: {card_info}\n\n👤 Укажите ФИО:")
+        await update.message.reply_text(f"💳 Вы указали IBAN: {card_info}\n\n🔢 Теперь введите номер карты:")
+        return self.ENTERING_CARD_NUMBER
+
+    async def entering_card_number(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        card_number = update.message.text.strip()
+        if not card_number:
+            await update.message.reply_text("Пожалуйста, введите корректный номер карты.")
+            return self.ENTERING_CARD_NUMBER
+
+        context.user_data['card_number'] = card_number
+        await update.message.reply_text(f"🔢 Вы указали номер карты: {card_number}\n\n👤 Укажите ФИО:")
         return self.ENTERING_FIO_DETAILS
 
     async def entering_fio_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -218,7 +228,8 @@ class ExchangeHandler:
             f"💰 Обмен {amount} {currency} на {sum_uah:.2f} UAH.\n\n"
             f"🏦 Банк: `{context.user_data['bank_name']}`\n"
             f"👤 ФИО: `{context.user_data['fio']}`\n"
-            f"💳 Реквизиты: `{context.user_data['card_info']}`\n"
+            f"💳 IBAN: `{context.user_data['card_info']}`\n"
+            f"🔢 Номер карты: `{context.user_data['card_number']}`\n"
             f"🆔 ИНН: `{inn}`\n\n"
             "👉 Нажмите 'Отправить' для подтверждения или 'Получить TRX', если вам нужен TRX для комиссии.",
             reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown'
@@ -626,6 +637,7 @@ class ExchangeHandler:
         bank_name_safe = sanitize_for_code_block(request_data['bank_name'])
         fio_safe = sanitize_for_code_block(request_data['fio'])
         card_info_safe = sanitize_for_code_block(request_data['card_info'])
+        card_number_safe = sanitize_for_code_block(request_data['card_number'])
         inn_safe = sanitize_for_code_block(request_data['inn'])
         trx_address_safe = sanitize_for_code_block(request_data['trx_address'])
 
@@ -638,7 +650,8 @@ class ExchangeHandler:
 
         transfer_details_block = (f"🏦 Банк: `{bank_name_safe}`\n"
                                   f"📝 ФИО: `{fio_safe}`\n"
-                                  f"💳 Реквизиты: `{card_info_safe}`\n"
+                                  f"💳 IBAN: `{card_info_safe}`\n"
+                                  f"🔢 Номер карты: `{card_number_safe}`\n"
                                   f"📇 ИНН: `{inn_safe}`\n\n")
 
         base_text = (f"{title}\n\n"
@@ -757,6 +770,7 @@ class ExchangeHandler:
                 self.ENTERING_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_amount)],
                 self.ENTERING_BANK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_bank_name)],
                 self.ENTERING_CARD_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_card_details)],
+                self.ENTERING_CARD_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_card_number)],
                 self.ENTERING_FIO_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_fio_details)],
                 self.ENTERING_INN_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_inn_details)],
                 self.CONFIRMING_EXCHANGE: [CallbackQueryHandler(self.confirming_exchange, pattern='^(send_exchange|send_exchange_trx|back_to_menu)$')],

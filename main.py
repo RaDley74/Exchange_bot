@@ -21,7 +21,8 @@ os.makedirs("database", exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    # Измененная строка для выравнивания:
+    format='%(asctime)s - %(name)-25s - %(levelname)-8s - %(message)s',
     handlers=[
         logging.FileHandler("log/bot.log", encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
