@@ -743,22 +743,56 @@ class ExchangeHandler:
         self.bot.db.update_request_data(
             request_id, {'admin_message_ids': json.dumps(admin_message_ids)})
 
-    async def _update_admin_messages(self, request_id, text, reply_markup):
-        """Updates messages for all administrators."""
+    async def _update_admin_messages(self, request_id: int, text: str, reply_markup: InlineKeyboardMarkup):
+        """
+        Deletes old admin messages for a request and sends new ones with the updated status.
+        Also updates the stored message IDs in the database.
+        """
         request_data = self.bot.db.get_request_by_id(request_id)
-        if not request_data or not request_data['admin_message_ids']:
+        if not request_data:
+            logger.warning(
+                f"_update_admin_messages called for non-existent request_id {request_id}")
             return
 
-        admin_message_ids = json.loads(request_data['admin_message_ids'])
-        for admin_id, message_id in admin_message_ids.items():
+        # 1. Delete old messages if their IDs are stored
+        if request_data['admin_message_ids']:
             try:
-                await self.bot.application.bot.edit_message_text(
-                    chat_id=admin_id, message_id=message_id, text=text,
-                    reply_markup=reply_markup, parse_mode='Markdown'
+                old_admin_message_ids = json.loads(request_data['admin_message_ids'])
+                for admin_id, message_id in old_admin_message_ids.items():
+                    try:
+                        await self.bot.application.bot.delete_message(chat_id=admin_id, message_id=message_id)
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not delete old admin message {message_id} for admin {admin_id}: {e}")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.error(
+                    f"Failed to parse or process admin_message_ids for request #{request_id}: {e}")
+
+        # 2. Send new messages to all admins and collect their IDs
+        admin_ids = self.bot.config.admin_ids
+        new_admin_message_ids = {}
+        if not admin_ids:
+            logger.warning("No admin IDs configured, cannot send/update admin messages.")
+            self.bot.db.update_request_data(request_id, {'admin_message_ids': json.dumps({})})
+            return
+
+        for admin_id in admin_ids:
+            try:
+                msg = await self.bot.application.bot.send_message(
+                    chat_id=admin_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
                 )
+                new_admin_message_ids[admin_id] = msg.message_id
             except Exception as e:
-                # The message might have been deleted or the bot blocked.
-                logger.warning(f"Failed to update message for admin {admin_id}: {e}")
+                logger.error(
+                    f"Failed to send updated message to admin {admin_id} for request #{request_id}: {e}")
+
+        # 3. Update the database with the new message IDs
+        self.bot.db.update_request_data(
+            request_id, {'admin_message_ids': json.dumps(new_admin_message_ids)}
+        )
 
     def setup_handlers(self, application):
         """Creates and registers all handlers related to the exchange process."""
