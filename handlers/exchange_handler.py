@@ -627,9 +627,9 @@ class ExchangeHandler:
     def _prepare_admin_notification(self, request_data):
         """Prepares the text and keyboard for the administrator notification."""
         username_display = 'нет'
-        if request_data['username']:
-            username_display = request_data['username'].replace('_', '\\_').replace(
-                '*', '\\*').replace('`', '\\`').replace('[', '\\[')
+        # if request_data['username']:
+        #     username_display = request_data['username'].replace('_', '\\_').replace(
+        #         '*', '\\*').replace('`', '\\`').replace('[', '\\[')
 
         def sanitize_for_code_block(text):
             return str(text).replace('`', "'") if text else ""

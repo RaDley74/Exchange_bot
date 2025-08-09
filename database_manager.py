@@ -38,6 +38,22 @@ class DatabaseManager:
             self._conn.close()
             logger.info("Database connection closed.")
 
+    def _add_missing_columns(self):
+        """Adds missing columns to the exchange_requests table for backward compatibility."""
+        try:
+            cursor = self._conn.cursor()
+            cursor.execute("PRAGMA table_info(exchange_requests);")
+            columns = [row['name'] for row in cursor.fetchall()]
+
+            if 'card_number' not in columns:
+                cursor.execute("ALTER TABLE exchange_requests ADD COLUMN card_number TEXT;")
+                logger.info("Successfully added 'card_number' column to 'exchange_requests' table.")
+
+            self._conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Failed to add missing columns: {e}")
+            self._conn.rollback()
+
     def setup_database(self):
         """
         Creates the necessary tables if they don't exist.
@@ -59,6 +75,7 @@ class DatabaseManager:
             amount_uah REAL,
             bank_name TEXT,
             card_info TEXT,
+            card_number TEXT,
             fio TEXT,
             inn TEXT,
             trx_address TEXT,
@@ -75,6 +92,8 @@ class DatabaseManager:
             cursor.execute(create_table_query)
             self._conn.commit()
             logger.info("Database setup complete. 'exchange_requests' table is ready.")
+            # Add missing columns for older versions
+            self._add_missing_columns()
         except sqlite3.Error as e:
             logger.error(f"Failed to create table: {e}")
             self._conn.rollback()
@@ -88,8 +107,8 @@ class DatabaseManager:
         """
         query = """
         INSERT INTO exchange_requests 
-        (user_id, username, status, currency, amount_currency, amount_uah, bank_name, card_info, fio, inn, needs_trx, trx_address)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (user_id, username, status, currency, amount_currency, amount_uah, bank_name, card_info, card_number, fio, inn, needs_trx, trx_address)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             user.id,
@@ -100,6 +119,7 @@ class DatabaseManager:
             user_data.get('sum_uah'),
             user_data.get('bank_name'),
             user_data.get('card_info'),
+            user_data.get('card_number'),
             user_data.get('fio'),
             user_data.get('inn'),
             'trx_address' in user_data,
