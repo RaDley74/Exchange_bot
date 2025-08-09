@@ -174,7 +174,7 @@ class ExchangeHandler:
         context.user_data['bank_name'] = bank_name
         logger.info(f"User {update.effective_user.id} entered bank: {bank_name}")
         await update.message.reply_text(
-            f"🏦 Вы указали банк: {bank_name}\n\n💳 Введите реквизиты вашей банковской карты (IBAN или номер карты):"
+            f"🏦 Вы указали банк: {bank_name}\n\n💳 Введите Iban:"
         )
         return self.ENTERING_CARD_DETAILS
 
