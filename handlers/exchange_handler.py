@@ -709,7 +709,7 @@ class ExchangeHandler:
                 InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
             ]])
         elif status == 'payment received':
-            text += f"\n\n✅ Хэш: `{request_data.get('transaction_hash', 'Нет')}`"
+            text += f"\n\n✅ Хэш: `{getattr(request_data, "transaction_hash", None)}`"
             text += f"\n\n✅3️⃣ Уведомление о получении средств отправлено."
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("✅ Перевод клиенту сделан",
