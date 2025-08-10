@@ -278,10 +278,12 @@ class ExchangeHandler:
         logger.info(
             f"[Uid] ({user.id}, {user.username}) - Creating a standard exchange request (#{request_id}).")
 
-        user_keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Я совершил(а) перевод",
-                                 callback_data=f"user_confirms_sending_{request_id}")
-        ]])
+        user_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Я совершил(а) перевод",
+                                  callback_data=f"user_confirms_sending_{request_id}")],
+            [InlineKeyboardButton("❌ Отменить заявку",
+                                  callback_data=f"cancel_by_user_{request_id}")]
+        ])
 
         wallet_address = self.bot.config.wallet_address
 
@@ -322,10 +324,12 @@ class ExchangeHandler:
                 f"📥 Переведите {amount_display:.2f} {request_data['currency']} на кошелек:\n" \
                 f"`{self.bot.config.wallet_address}`\n\n" \
                 "После перевода нажмите кнопку ниже для предоставления хэша."
-            user_keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Я совершил(а) перевод",
-                                     callback_data=f"user_confirms_sending_{request_id}")
-            ]])
+            user_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Я совершил(а) перевод",
+                                      callback_data=f"user_confirms_sending_{request_id}")],
+                [InlineKeyboardButton("❌ Отменить заявку",
+                                      callback_data=f"cancel_by_user_{request_id}")]
+            ])
         elif status == 'awaiting confirmation':
             user_text = "✅ Спасибо, ваш хэш получен и отправлен на проверку."
         elif status == 'payment received':
@@ -423,7 +427,7 @@ class ExchangeHandler:
 
             logger.info(
                 f"[Uid] ({user.id}, {user.username}) - Creating an exchange request with TRX (#{request_id}).")
-            msg = await query.message.chat.send_message(
+            msg = await query.edit_message_text(
                 f"🙏 Спасибо за заявку #{request_id}!\n\n"
                 "🏦 Ожидайте сообщения об успешном переводе TRX ✅",
                 parse_mode='Markdown'
@@ -495,10 +499,10 @@ class ExchangeHandler:
             await query.answer("Заявка не найдена!", show_alert=True)
             return
 
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Я совершил(а) перевод",
-                                 callback_data=f"user_confirms_sending_{request_id}")
-        ]])
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Я совершил(а) перевод",
+                                  callback_data=f"user_confirms_sending_{request_id}")],
+        ])
         msg = await context.bot.send_message(
             chat_id=request_data['user_id'],
             text=(f"✅ Перевод TRX выполнен для заявки #{request_id}.\n\n"
@@ -646,6 +650,34 @@ class ExchangeHandler:
             reply_markup=None,
             parse_mode='Markdown'
         )
+
+    async def cancel_request_by_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handles the user's request to cancel an application."""
+        query = update.callback_query
+        await query.answer()
+        request_id = int(query.data.split('_')[-1])
+        user = query.from_user
+
+        logger.info(
+            f"[Uid] ({user.id}, {user.username}) - User initiated cancellation for request #{request_id}.")
+
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data or request_data['status'] in ['completed', 'declined']:
+            await query.edit_message_text("❌ Эту заявку уже нельзя отменить.", reply_markup=None)
+            return
+
+        self.bot.db.update_request_status(request_id, 'declined')
+
+        await query.edit_message_text(
+            f"✅ Ваша заявка #{request_id} была успешно отменена.",
+            reply_markup=None
+        )
+
+        admin_text, _ = self._prepare_admin_notification(
+            self.bot.db.get_request_by_id(request_id)
+        )
+        admin_text += f"\n\n❌🚫 ЗАЯВКА ОТМЕНЕНА ПОЛЬЗОВАТЕЛЕМ (@{user.username or user.id})"
+        await self._update_admin_messages(request_id, admin_text, None)
 
     def _prepare_admin_notification(self, request_data):
         username_display = 'none'
@@ -846,5 +878,7 @@ class ExchangeHandler:
             self.handle_transfer_confirmation_trx, pattern=r'^confirm_trx_transfer_\d+'))
         application.add_handler(CallbackQueryHandler(
             self.handle_by_user_transfer_confirmation, pattern=r'^by_user_confirm_transfer_\d+'))
+        application.add_handler(CallbackQueryHandler(
+            self.cancel_request_by_user, pattern=r'^cancel_by_user_\d+'))
 
         application.add_handler(CommandHandler('start', self.start_command))
