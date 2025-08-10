@@ -41,7 +41,7 @@ class AdminPanelHandler:
         'completed'
     ]
     # Конечные статусы, из которых нельзя изменить состояние
-    TERMINAL_STATUSES = ['completed', 'declined']
+    TERMINAL_STATUSES = ['completed']
 
     def __init__(self, bot_instance):
         """
