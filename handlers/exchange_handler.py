@@ -22,8 +22,8 @@ class ExchangeHandler:
         CHOOSING_CURRENCY, ENTERING_AMOUNT, ENTERING_BANK_NAME, ENTERING_CARD_DETAILS,
         ENTERING_CARD_NUMBER, ENTERING_FIO_DETAILS, ENTERING_INN_DETAILS, CONFIRMING_EXCHANGE,
         CONFIRMING_EXCHANGE_TRX, ENTERING_TRX_ADDRESS, FINAL_CONFIRMING_EXCHANGE_TRX,
-        ENTERING_HASH,
-    ) = range(12)
+        ENTERING_HASH, SELECTING_CANCELLATION_TYPE, AWAITING_REASON_TEXT,
+    ) = range(14)
 
     def __init__(self, bot_instance):
         """
@@ -598,30 +598,163 @@ class ExchangeHandler:
         }
         return translations.get(status.lower(), status)
 
-    async def handle_decline_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def start_cancellation_flow(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Starts the cancellation process by offering choices."""
         query = update.callback_query
+        request_id = int(query.data.split('_')[-1])
+        context.chat_data['request_id_for_cancellation'] = request_id
+
+        keyboard = [
+            [InlineKeyboardButton("✏️ Указать причину и отменить",
+                      callback_data=f"ask_reason_{request_id}")],
+            [InlineKeyboardButton("🚫 Отменить без причины",
+                                callback_data=f"confirm_decline_no_reason_{request_id}")],
+            [InlineKeyboardButton("⬅️ Назад", 
+                                callback_data="cancel_decline_process")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
         await query.answer()
+        await query.edit_message_text(f"Выберите действие для заявки #{request_id}:", reply_markup=reply_markup)
+
+        return self.SELECTING_CANCELLATION_TYPE
+
+    async def ask_for_reason_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Edits the message to ask for the cancellation reason."""
+        query = update.callback_query
+        request_id = context.chat_data.get('request_id_for_cancellation')
+        await query.answer()
+        await query.edit_message_text(f"📝 Введите причину отмены для заявки #{request_id}, которая будет отправлена пользователю:")
+        return self.AWAITING_REASON_TEXT
+
+    async def handle_decline_request_no_reason(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Declines a request without a specified reason."""
+        query = update.callback_query
         request_id = int(query.data.split('_')[-1])
         admin_user = query.from_user
+
+        await query.answer()
         logger.info(
-            f"[Aid] ({admin_user.id}, {admin_user.username}) - Declined request #{request_id}.")
+            f"[Aid] ({admin_user.id}, {admin_user.username}) - Declined request #{request_id} without reason.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
-            return
+            await query.edit_message_text(f"❌ Заявка #{request_id} больше не найдена.")
+            return ConversationHandler.END
 
+        # 1. Immediately edit the message to give the admin feedback.
+        await query.edit_message_text(f"✅ Заявка #{request_id} успешно отменена. Обновляю информацию...")
+
+        # 2. Notify the user
         support_contact = self.bot.config.support_contact
-        msg = await context.bot.send_message(
-            chat_id=request_data['user_id'],
-            text=f"❌ Ваша заявка #{request_id} была отклонена.\n\nПо вопросам обращайтесь: {support_contact}"
-        )
+        try:
+            msg = await context.bot.send_message(
+                chat_id=request_data['user_id'],
+                text=f"❌ Ваша заявка #{request_id} была отменена.\n\n📞 По вопросам обращайтесь: {support_contact}"
+            )
+            self.bot.db.update_request_data(request_id, {'user_message_id': msg.message_id})
+        except Exception as e:
+            logger.error(
+                f"[System] - Failed to send cancellation message to user {request_data['user_id']}: {e}")
 
+        # 3. Update DB status
         self.bot.db.update_request_status(request_id, 'declined')
-        self.bot.db.update_request_data(request_id, {'user_message_id': msg.message_id})
+
+        # 4. Prepare and send the final updated notification to all admins.
         updated_text, _ = self._prepare_admin_notification(
             self.bot.db.get_request_by_id(request_id))
         updated_text += f"\n\n📄 Прежний статус заявки: {self.translate_status(request_data['status'])}\n\n❌🚫 ЗАЯВКА ОТКЛОНЕНА (🛡️ админ @{admin_user.username or admin_user.id})"
+
         await self._update_admin_messages(request_id, updated_text, None)
+
+        return ConversationHandler.END
+
+    async def handle_cancellation_with_reason(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handles the cancellation reason provided by the admin, notifies the user, and updates the status."""
+        admin_user = update.effective_user
+        reason = update.message.text
+        request_id = context.chat_data.pop('request_id_for_cancellation', None)
+
+        if not request_id:
+            await update.message.reply_text("❌ Произошла ошибка сессии. Не удалось найти заявку для отмены.")
+            return ConversationHandler.END
+
+        await update.message.reply_text(f"Отменяю заявку #{request_id}...")
+        logger.info(
+            f"[Aid] ({admin_user.id}, {admin_user.username}) - Cancelling request #{request_id} with reason: {reason}")
+
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            await update.message.reply_text(f"❌ Заявка #{request_id} не найдена.")
+            return ConversationHandler.END
+
+        # Send a message with the reason to the user
+        support_contact = self.bot.config.support_contact
+        user_message = (f"❌ Ваша заявка #{request_id} была отменена.\n\n"
+                        f"📄 Причина: {reason}\n\n"
+                        f"📞 По вопросам обращайтесь: {support_contact}")
+
+        try:
+            msg = await context.bot.send_message(
+                chat_id=request_data['user_id'],
+                text=user_message
+            )
+            self.bot.db.update_request_data(request_id, {'user_message_id': msg.message_id})
+        except Exception as e:
+            logger.error(
+                f"[System] - Failed to send cancellation message to user {request_data['user_id']}: {e}")
+            await update.message.reply_text(f"⚠️ Не удалось отправить сообщение пользователю {request_data['user_id']}. Проверьте, не заблокировал ли он бота.")
+
+        # Update the request status in the database
+        self.bot.db.update_request_status(request_id, 'declined')
+
+        # Prepare and send the updated notification to all admins
+        updated_text, _ = self._prepare_admin_notification(
+            self.bot.db.get_request_by_id(request_id))
+        updated_text += (f"\n\n📄 Прежний статус заявки: {self.translate_status(request_data['status'])}\n"
+                         f"💬 Причина: {reason}\n\n"
+                         f"❌🚫 ЗАЯВКА ОТКЛОНЕНА (🛡️ админ @{admin_user.username or admin_user.id})")
+
+        await self._update_admin_messages(request_id, updated_text, None)
+        await update.message.reply_text(f"✅ Заявка #{request_id} успешно отменена. Пользователь уведомлен.")
+
+        return ConversationHandler.END
+
+    async def _cancel_cancellation_flow(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Cancels the decline process and restores the original application message."""
+        query = update.callback_query
+        await query.answer()
+        admin_user = update.effective_user
+        request_id = context.chat_data.pop('request_id_for_cancellation', None)
+
+        if not request_id:
+            await query.edit_message_text("❌ Произошла ошибка. Не удалось восстановить заявку. Пожалуйста, попробуйте снова.", reply_markup=None)
+            logger.warning(
+                f"[Aid] ({admin_user.id}) - _cancel_cancellation_flow called without a request_id in chat_data.")
+            return ConversationHandler.END
+
+        logger.info(
+            f"[Aid] ({admin_user.id}, {admin_user.username}) - Canceled the decline process for request #{request_id}. Restoring message.")
+
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            await query.edit_message_text(f"❌ Заявка #{request_id} больше не найдена.", reply_markup=None)
+            return ConversationHandler.END
+
+        # Re-generate the original message content using the helper function.
+        text, keyboard = self._generate_admin_message_content(request_data)
+
+        try:
+            await query.edit_message_text(
+                text=text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Error restoring admin message for request #{request_id}: {e}")
+            await query.message.reply_text("Не удалось отредактировать сообщение. Действие отменено.")
+
+        return ConversationHandler.END
 
     async def handle_by_user_transfer_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -731,11 +864,48 @@ class ExchangeHandler:
                 keyboard = InlineKeyboardMarkup([[
                     InlineKeyboardButton("✅ TRX переведено",
                                          callback_data=f"confirm_trx_transfer_{request_data['id']}"),
-                    InlineKeyboardButton(
+                    InlineKeyboardButton( 
                         "❌ Отказать", callback_data=f"decline_request_{request_data['id']}")
                 ]])
 
         return base_text, keyboard
+
+    def _generate_admin_message_content(self, request_data):
+        """Generates the text and keyboard for an admin notification based on request status."""
+        text, keyboard = self._prepare_admin_notification(request_data)
+        status = request_data['status']
+        request_id = request_data['id']
+        tx_hash = request_data["transaction_hash"] or "не указан"
+
+        if status == 'awaiting confirmation':
+            text += f"\n\n✅2️⃣ Пользователь подтвердил перевод. Hash: `{tx_hash}`"
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Средства получены",
+                                     callback_data=f"confirm_payment_{request_id}"),
+                InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
+            ]])
+
+        elif status == 'payment received':
+            text += f"\n\n✅ Hash: `{tx_hash}`"
+            text += f"\n\n✅3️⃣ Уведомление о получении средств отправлено."
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Перевод клиенту сделан",
+                                     callback_data=f"confirm_transfer_{request_id}"),
+                InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
+            ]])
+        elif status == 'funds sent':
+            text += f"\n\n✅ Hash: `{tx_hash}`"
+            text += "\n\n✅4️⃣ Уведомление об отправке средств клиенту отправлено."
+            keyboard = None
+        elif status == 'completed':
+            text += f"\n\n✅ Hash: `{tx_hash}`"
+            text += "\n\n✅🛑 Пользователь подтвердил получение средств. ЗАЯВКА ЗАВЕРШЕНА. 🛑✅"
+            keyboard = None
+        elif status == 'declined':
+            text += f"\n\n❌ ЗАЯВКА ОТКЛОНЕНА"
+            keyboard = None
+
+        return text, keyboard
 
     async def _send_admin_notification(self, request_id, is_restoration=False):
         admin_ids = self.bot.config.admin_ids
@@ -746,36 +916,7 @@ class ExchangeHandler:
         if not request_data:
             return
 
-        text, keyboard = self._prepare_admin_notification(request_data)
-        status = request_data['status']
-
-        if status == 'awaiting confirmation':
-            text += f"\n\n✅2️⃣ Пользователь подтвердил перевод. Hash: `{request_data['transaction_hash']}`"
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Средства получены",
-                                     callback_data=f"confirm_payment_{request_id}"),
-                InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
-            ]])
-        elif status == 'payment received':
-            text += f"\n\n✅ Hash: `{getattr(request_data, "transaction_hash", None)}`"
-            text += f"\n\n✅3️⃣ Уведомление о получении средств отправлено."
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Перевод клиенту сделан",
-                                     callback_data=f"confirm_transfer_{request_id}"),
-                InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
-            ]])
-        elif status == 'funds sent':
-            text += f"\n\n✅ Hash: `{getattr(request_data, "transaction_hash", None)}`"
-            text += "\n\n✅4️⃣ Уведомление об отправке средств клиенту отправлено."
-            keyboard = None
-        elif status == 'completed':
-            text += f"\n\n✅ Hash: `{getattr(request_data, "transaction_hash", None)}`"
-            text += "\n\n✅🛑 Пользователь подтвердил получение средств. ЗАЯВКА ЗАВЕРШЕНА. 🛑✅"
-            keyboard = None
-        elif status == 'declined':
-            text += f"\n\n❌ ЗАЯВКА ОТКЛОНЕНА"
-            keyboard = None
-
+        text, keyboard = self._generate_admin_message_content(request_data)
         admin_message_ids = {}
 
         for admin_id in admin_ids:
@@ -865,11 +1006,29 @@ class ExchangeHandler:
             fallbacks=[CommandHandler('start', self.cancel_and_restart)],
         )
 
+        cancellation_conv_handler = ConversationHandler(
+            entry_points=[CallbackQueryHandler(
+                self.start_cancellation_flow, pattern=r'^decline_request_\d+')],
+            states={
+                self.SELECTING_CANCELLATION_TYPE: [
+                    CallbackQueryHandler(self.ask_for_reason_text, pattern=r'^ask_reason_'),
+                    CallbackQueryHandler(self.handle_decline_request_no_reason,
+                                         pattern=r'^confirm_decline_no_reason_'),
+                ],
+                self.AWAITING_REASON_TEXT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND,
+                                   self.handle_cancellation_with_reason)
+                ],
+            },
+            fallbacks=[CallbackQueryHandler(
+                self._cancel_cancellation_flow, pattern='^cancel_decline_process$')],
+            conversation_timeout=300
+        )
+
         application.add_handler(exchange_conv_handler)
         application.add_handler(hash_conv_handler)
+        application.add_handler(cancellation_conv_handler)
 
-        application.add_handler(CallbackQueryHandler(
-            self.handle_decline_request, pattern=r'^decline_request_\d+'))
         application.add_handler(CallbackQueryHandler(
             self.handle_payment_confirmation, pattern=r'^confirm_payment_\d+'))
         application.add_handler(CallbackQueryHandler(
