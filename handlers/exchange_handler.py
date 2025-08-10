@@ -584,16 +584,16 @@ class ExchangeHandler:
             return
 
         support_contact = self.bot.config.support_contact
-        await context.bot.send_message(
+        msg = await context.bot.send_message(
             chat_id=request_data['user_id'],
             text=f"❌ Ваша заявка #{request_id} была отклонена.\n\nПо вопросам обращайтесь: {support_contact}"
         )
 
         self.bot.db.update_request_status(request_id, 'declined')
-
+        self.bot.db.update_request_data(request_id, {'user_message_id': msg.message_id})
         updated_text, _ = self._prepare_admin_notification(
             self.bot.db.get_request_by_id(request_id))
-        updated_text += f"\n\n❌ ЗАЯВКА ОТКЛОНЕНА (админ @{admin_user.username or admin_user.id})"
+        updated_text += f"\n\n📄 Прежний статус заявки: {self.translate_status(request_data['status'])}\n\n❌🚫 ЗАЯВКА ОТКЛОНЕНА (🛡️ админ @{admin_user.username or admin_user.id})"
         await self._update_admin_messages(request_id, updated_text, None)
 
     async def handle_by_user_transfer_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
