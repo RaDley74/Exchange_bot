@@ -6,6 +6,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ConversationHandler, ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 )
+# Добавим импорт TelegramError для корректной обработки ошибок
+from telegram.error import TelegramError
+
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +251,7 @@ class ExchangeHandler:
         data = query.data
 
         if data == 'send_exchange':
+            context.user_data.pop('trx_address', None)
             request_id = self.bot.db.create_exchange_request(query.from_user, context.user_data)
             if not request_id:
                 await query.edit_message_text("❌ Произошла ошибка при создании заявки. Попробуйте снова.")
@@ -333,7 +337,7 @@ class ExchangeHandler:
         elif status == 'awaiting confirmation':
             user_text = "✅ Спасибо, ваш хэш получен и отправлен на проверку."
         elif status == 'payment received':
-            user_text = f"✅ Средства по заявке #{request_id} получены.\n\n⏳ Ожидайте перевода."
+            user_text = f"✅ Средства по заявке #{request_id} получены."
         elif status == 'funds sent':
             user_text = f"⏳ В течение часа средства по заявке #{request_id} будут зачислены на указанные вами реквизиты.\n\n" \
                 "⚠️ Пожалуйста, не подтверждайте получение, пока средства фактически не поступят.\n\n" \
@@ -535,7 +539,7 @@ class ExchangeHandler:
         if not request_data:
             return
 
-        msg = await context.bot.send_message(chat_id=request_data['user_id'], text=f"✅ Средства по заявке #{request_id} получены.\n\n⏳ Ожидайте перевода.")
+        msg = await context.bot.send_message(chat_id=request_data['user_id'], text=f"✅ Средства по заявке #{request_id} получены.")
 
         self.bot.db.update_request_data(request_id, {'user_message_id': msg.message_id})
         self.bot.db.update_request_status(request_id, 'payment received')
@@ -642,8 +646,23 @@ class ExchangeHandler:
             await query.edit_message_text(f"❌ Заявка #{request_id} больше не найдена.")
             return ConversationHandler.END
 
+        # --- НАЧАЛО ИЗМЕНЕНИЙ ---
+        # Удаляем предыдущее сообщение о статусе у пользователя
+        if request_data['user_message_id']:
+            try:
+                await context.bot.delete_message(
+                    chat_id=request_data['user_id'],
+                    message_id=request_data['user_message_id']
+                )
+                logger.info(
+                    f"[System] - Deleted old status message {request_data['user_message_id']} for user {request_data['user_id']} during cancellation.")
+            except TelegramError as e:
+                logger.warning(
+                    f"[System] - Failed to delete old user message during cancellation for request #{request_id}: {e}")
+        # --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
         # 1. Immediately edit the message to give the admin feedback.
-        await query.edit_message_text(f"✅ Заявка #{request_id} успешно отменена. Обновляю информацию...")
+        # await query.edit_message_text(f"✅ Заявка #{request_id} успешно отменена. Обновляю информацию...")
 
         # 2. Notify the user
         support_contact = self.bot.config.support_contact
@@ -679,7 +698,6 @@ class ExchangeHandler:
             await update.message.reply_text("❌ Произошла ошибка сессии. Не удалось найти заявку для отмены.")
             return ConversationHandler.END
 
-        await update.message.reply_text(f"Отменяю заявку #{request_id}...")
         logger.info(
             f"[Aid] ({admin_user.id}, {admin_user.username}) - Cancelling request #{request_id} with reason: {reason}")
 
@@ -687,6 +705,21 @@ class ExchangeHandler:
         if not request_data:
             await update.message.reply_text(f"❌ Заявка #{request_id} не найдена.")
             return ConversationHandler.END
+
+        # --- НАЧАЛО ИЗМЕНЕНИЙ ---
+        # Удаляем предыдущее сообщение о статусе у пользователя
+        if request_data['user_message_id']:
+            try:
+                await context.bot.delete_message(
+                    chat_id=request_data['user_id'],
+                    message_id=request_data['user_message_id']
+                )
+                logger.info(
+                    f"[System] - Deleted old status message {request_data['user_message_id']} for user {request_data['user_id']} during cancellation with reason.")
+            except TelegramError as e:
+                logger.warning(
+                    f"[System] - Failed to delete old user message during cancellation for request #{request_id}: {e}")
+        # --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
         # Send a message with the reason to the user
         support_contact = self.bot.config.support_contact
@@ -716,7 +749,6 @@ class ExchangeHandler:
                          f"❌🚫 ЗАЯВКА ОТКЛОНЕНА (🛡️ админ @{admin_user.username or admin_user.id})")
 
         await self._update_admin_messages(request_id, updated_text, None)
-        await update.message.reply_text(f"✅ Заявка #{request_id} успешно отменена. Пользователь уведомлен.")
 
         return ConversationHandler.END
 
