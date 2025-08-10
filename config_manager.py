@@ -27,23 +27,23 @@ class ConfigManager:
         """
         if not os.path.exists(self.file_path):
             logger.warning(
-                f"Configuration file '{self.file_path}' not found. Creating a new file.")
+                f"[System] - Configuration file '{self.file_path}' not found. Creating a new file.")
             self._create_default_config()
             try:
                 with open(self.file_path, 'w', encoding='utf-8') as config_file:
                     self._config.write(config_file)
                 logger.info(
-                    f"Configuration file '{self.file_path}' created. Please edit it and restart the bot.")
+                    f"[System] - Configuration file '{self.file_path}' has been created. Please edit it and restart the bot.")
                 print(
-                    f"Configuration file '{self.file_path}' created. Specify the token and ID, then restart the script.")
+                    f"Configuration file '{self.file_path}' has been created. Specify the token and ID, then restart the script.")
                 input("Press Enter to exit...")
                 exit(0)
             except IOError as e:
-                logger.error(f"Failed to create configuration file: {e}")
+                logger.error(f"[System] - Failed to create configuration file: {e}")
                 exit(1)
         else:
             self._config.read(self.file_path, encoding='utf-8')
-            logger.info(f"Configuration file '{self.file_path}' loaded successfully.")
+            logger.info(f"[System] - Configuration file '{self.file_path}' loaded successfully.")
 
     def _create_default_config(self):
         """Creates the default configuration structure."""
@@ -55,7 +55,7 @@ class ConfigManager:
             'EXCHANGE_RATE': 'your_exchange_rate_here',
             'ADMIN_PASSWORD': 'your_admin_password_here',
             'WALLET_ADDRESS': 'your_wallet_address_here',
-            'SUPPORT_CONTACT': 'your_support_contact_here', 
+            'SUPPORT_CONTACT': 'your_support_contact_here',
             'BOT_ENABLED': 'True'
         }
 
@@ -64,9 +64,9 @@ class ConfigManager:
         try:
             with open(self.file_path, 'w', encoding='utf-8') as config_file:
                 self._config.write(config_file)
-            logger.info("Configuration saved successfully.")
+            logger.info("[System] - Configuration saved successfully.")
         except IOError as e:
-            logger.error(f"Error while saving configuration: {e}")
+            logger.error(f"[System] - Error saving configuration: {e}")
 
     async def save(self):
         """
@@ -102,7 +102,7 @@ class ConfigManager:
             return [int(admin_id.strip()) for admin_id in admin_ids_str.split(',')]
         except ValueError:
             logger.error(
-                "Error in ADMIN_CHAT_ID format. Ensure it's a comma-separated list of numbers.")
+                "[System] - Error in ADMIN_CHAT_ID format. Make sure it is a comma-separated list of numbers.")
             return []
 
     @property

@@ -21,7 +21,6 @@ os.makedirs("database", exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
-    # Измененная строка для выравнивания:
     format='%(asctime)s - %(name)-25s - %(levelname)-8s - %(message)s',
     handlers=[
         logging.FileHandler("log/bot.log", encoding='utf-8'),
@@ -40,7 +39,7 @@ class Bot:
     """
 
     def __init__(self):
-        logger.info("Initializing the bot...")
+        logger.info("[System] - Initializing the bot...")
 
         # 1. Create and load the configuration
         self.config = ConfigManager()
@@ -66,7 +65,7 @@ class Bot:
         """
         self.admin_handler.setup_handlers(self.application)
         self.exchange_handler.setup_handlers(self.application)
-        logger.info("Handlers have been set up successfully.")
+        logger.info("[System] - Handlers have been successfully set up.")
 
     def run(self):
         """
@@ -74,7 +73,7 @@ class Bot:
         """
         try:
             self.setup_handlers()
-            logger.info("Bot is running and ready to work...")
+            logger.info("[System] - Bot is running and ready to work...")
             self.application.run_polling()
         finally:
             # --- Ensure the database connection is closed gracefully ---

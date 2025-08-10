@@ -30,7 +30,7 @@ class AdminPanelHandler:
         SELECT_NEW_STATUS,
     ) = range(11)
 
-    # Упорядоченный список статусов, определяющий основной рабочий процесс
+    # Ordered list of statuses defining the main workflow
     WORKFLOW_STATUSES = [
         'new',
         'awaiting trx transfer',
@@ -40,7 +40,7 @@ class AdminPanelHandler:
         'funds sent',
         'completed'
     ]
-    # Конечные статусы, из которых нельзя изменить состояние
+    # Terminal statuses from which the state cannot be changed
     TERMINAL_STATUSES = ['completed']
 
     def __init__(self, bot_instance):
@@ -52,7 +52,7 @@ class AdminPanelHandler:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
-        logger.info(f"User {user.id} ({user.username}) is trying to access the admin panel.")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Trying to access the admin panel.")
 
         if not self.bot.config.admin_ids:
             await update.message.reply_text("❌ Бот не активирован. Нет ID администратора.")
@@ -70,15 +70,16 @@ class AdminPanelHandler:
         user = update.effective_user
 
         if entered_password == self.bot.config.admin_password:
-            logger.info(f"Admin {user.id} ({user.username}) entered the correct password.")
+            logger.info(f"[Aid] ({user.id}, {user.username}) - Entered the correct password.")
             return await self._show_main_menu(update, context)
         else:
-            logger.warning(f"Admin {user.id} ({user.username}) entered the wrong password.")
+            logger.warning(f"[Aid] ({user.id}, {user.username}) - Entered the wrong password.")
             await update.message.reply_text("❌ Неверный пароль. Попробуйте снова:")
             return self.ASK_PASSWORD
 
     async def _show_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logger.info(f"Displaying admin main menu for {update.effective_user.id}.")
+        user = update.effective_user
+        logger.info(f"[Aid] ({user.id}, {user.username}) - Displaying the admin panel main menu.")
 
         is_enabled = self.bot.config.bot_enabled
         toggle_button_text = "🔴 Выключить бота" if is_enabled else "🟢 Включить бота"
@@ -96,7 +97,7 @@ class AdminPanelHandler:
             [
                 InlineKeyboardButton("🔧 Изменить статус", callback_data='change_status'),
             ],
-            [toggle_button],  # Добавили кнопку
+            [toggle_button],
         ]
         text = "⚙️ Админ-панель"
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -105,7 +106,7 @@ class AdminPanelHandler:
             try:
                 await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
             except TelegramError as e:
-                logger.warning(f"Could not edit admin menu message, sending new one. Error: {e}")
+                logger.warning(f"[Aid] ({user.id}, {user.username}) - Failed to edit the menu message, sending a new one. Error: {e}")
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=text,
@@ -121,7 +122,7 @@ class AdminPanelHandler:
         await query.answer()
         data = query.data
         user = query.from_user
-        logger.info(f"Admin {user.id} ({user.username}) selected option: {data}")
+        logger.info(f"[Aid] ({user.id}, {user.username}) - Selected option: {data}")
 
         if user.id not in self.bot.config.admin_ids:
             await query.message.reply_text("🚫 У вас нет доступа.")
@@ -160,7 +161,6 @@ class AdminPanelHandler:
         return self.ADMIN_MENU
 
     async def show_status_selection_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Shows a menu with available future statuses for a given request ID."""
         admin_user = update.effective_user
         try:
             request_id = int(update.message.text.strip())
@@ -168,7 +168,7 @@ class AdminPanelHandler:
             await update.message.reply_text("❌ ID заявки должен быть числом. Попробуйте снова.")
             return self.AWAIT_REQUEST_ID_FOR_STATUS_CHANGE
 
-        logger.info(f"Admin {admin_user.id} wants to change status for request #{request_id}.")
+        logger.info(f"[Aid] ({admin_user.id}, {admin_user.username}) - Wants to change status for request #{request_id}.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -185,20 +185,15 @@ class AdminPanelHandler:
         keyboard = []
         statuses_to_show = []
 
-        # Определяем, какие статусы можно установить
         try:
             current_index = self.WORKFLOW_STATUSES.index(current_status)
-            # Добавляем все последующие статусы из основного рабочего процесса
             statuses_to_show.extend(self.WORKFLOW_STATUSES[current_index + 1:])
         except ValueError:
-            # Если текущий статус не в основном потоке (маловероятно, но возможно),
-            # то для безопасности предлагаем все не-терминальные статусы
             logger.warning(
-                f"Status '{current_status}' for request #{request_id} not in WORKFLOW_STATUSES. Offering fallback options.")
+                f"[System] - Status '{current_status}' for request #{request_id} not found in WORKFLOW_STATUSES. Offering fallback options.")
             statuses_to_show.extend(
                 [s for s in self.WORKFLOW_STATUSES if s not in self.TERMINAL_STATUSES])
 
-        # Всегда добавляем "Отклонено" как возможный вариант
         statuses_to_show.append('declined')
 
         for status in statuses_to_show:
@@ -217,7 +212,6 @@ class AdminPanelHandler:
         return self.SELECT_NEW_STATUS
 
     async def process_status_change(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Processes the admin's choice of a new status."""
         query = update.callback_query
         await query.answer()
         data = query.data
@@ -234,36 +228,31 @@ class AdminPanelHandler:
 
         new_status = data.replace('set_status_', '')
         logger.info(
-            f"Admin {admin_user.id} is changing status of request #{request_id} to '{new_status}'.")
+            f"[Aid] ({admin_user.id}, {admin_user.username}) - Changing status of request #{request_id} to '{new_status}'.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
             await query.edit_message_text(f"❌ Заявка с ID #{request_id} больше не найдена.")
             return await self._show_main_menu(update, context)
 
-        # Update status in the database
         self.bot.db.update_request_status(request_id, new_status)
         translated_new_status = self.bot.exchange_handler.translate_status(new_status)
         await query.edit_message_text(f"✅ Статус для заявки #{request_id} обновлен на '{translated_new_status}'.\n\nПересоздаю сообщения для пользователя и админов...")
 
-        # Delete old messages and resend new ones based on the new status
         try:
             await self._delete_old_messages(request_data, context)
             await self.bot.exchange_handler.resend_messages_for_request(request_id)
             await query.message.reply_text(f"✅ Сообщения для заявки #{request_id} успешно обновлены.")
             logger.info(
-                f"Successfully updated messages for request #{request_id} after manual status change.")
+                f"[Aid] ({admin_user.id}, {admin_user.username}) - Successfully updated messages for request #{request_id} after manual status change.")
         except Exception as e:
             await query.message.reply_text(f"🚫 Произошла ошибка при обновлении сообщений: {e}")
             logger.error(
-                f"Failed to update messages for request #{request_id} after manual status change: {e}", exc_info=True)
+                f"[Aid] ({admin_user.id}, {admin_user.username}) - Failed to update messages for request #{request_id} after manual status change: {e}", exc_info=True)
 
         return await self._show_main_menu(update, context)
 
     async def restore_application(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handles the restoration of a deleted application message.
-        """
         admin_user = update.effective_user
         try:
             request_id = int(update.message.text.strip())
@@ -271,7 +260,7 @@ class AdminPanelHandler:
             await update.message.reply_text("❌ ID заявки должен быть числом. Попробуйте снова.")
             return self.AWAIT_REQUEST_ID_FOR_RESTORE
 
-        logger.info(f"Admin {admin_user.id} attempts to restore request #{request_id}.")
+        logger.info(f"[Aid] ({admin_user.id}, {admin_user.username}) - Trying to restore application #{request_id}.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -287,16 +276,15 @@ class AdminPanelHandler:
         try:
             await self.bot.exchange_handler.resend_messages_for_request(request_id)
             await update.message.reply_text(f"✅ Сообщения для заявки #{request_id} были успешно пересозданы для пользователя и администраторов.")
-            logger.info(f"Successfully restored messages for request #{request_id}.")
+            logger.info(f"[Aid] ({admin_user.id}, {admin_user.username}) - Successfully restored messages for application #{request_id}.")
         except Exception as e:
             await update.message.reply_text(f"🚫 Произошла ошибка при восстановлении заявки: {e}")
-            logger.error(f"Failed to restore request #{request_id}: {e}", exc_info=True)
+            logger.error(f"[Aid] ({admin_user.id}, {admin_user.username}) - Failed to restore application #{request_id}: {e}", exc_info=True)
 
         return await self._show_main_menu(update, context)
 
     async def _delete_old_messages(self, request_data: dict, context: ContextTypes.DEFAULT_TYPE):
-        """Safely deletes old messages related to a request for user and admins."""
-        logger.info(f"Attempting to delete old messages for request #{request_data['id']}.")
+        logger.info(f"[System] - Attempting to delete old messages for request #{request_data['id']}.")
 
         if request_data['user_message_id']:
             try:
@@ -305,9 +293,9 @@ class AdminPanelHandler:
                     message_id=request_data['user_message_id']
                 )
                 logger.info(
-                    f"Deleted old message {request_data['user_message_id']} for user {request_data['user_id']}.")
+                    f"[System] - Deleted old message {request_data['user_message_id']} for user {request_data['user_id']}.")
             except TelegramError as e:
-                logger.warning(f"Could not delete message for user {request_data['user_id']}: {e}")
+                logger.warning(f"[System] - Failed to delete message for user {request_data['user_id']}: {e}")
 
         if request_data['admin_message_ids']:
             try:
@@ -315,12 +303,12 @@ class AdminPanelHandler:
                 for admin_id, message_id in admin_message_ids.items():
                     try:
                         await context.bot.delete_message(chat_id=admin_id, message_id=message_id)
-                        logger.info(f"Deleted old message {message_id} for admin {admin_id}.")
+                        logger.info(f"[System] - Deleted old message {message_id} for admin {admin_id}.")
                     except TelegramError as e:
-                        logger.warning(f"Could not delete message for admin {admin_id}: {e}")
+                        logger.warning(f"[System] - Failed to delete message for admin {admin_id}: {e}")
             except (json.JSONDecodeError, TypeError) as e:
                 logger.error(
-                    f"Failed to parse admin_message_ids for request #{request_data['id']}: {e}")
+                    f"[System] - Failed to parse admin_message_ids for request #{request_data['id']}: {e}")
 
     async def _show_info(self, query):
         masked_password = '*' * len(self.bot.config.admin_password)
@@ -352,10 +340,10 @@ class AdminPanelHandler:
     async def show_user_applications(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_input = update.message.text.strip()
         admin_user = update.effective_user
-        logger.info(f"Admin {admin_user.id} is searching for applications of user: {user_input}")
+        logger.info(f"[Aid] ({admin_user.id}, {admin_user.username}) - Searching for user applications: {user_input}")
 
         all_applications = self.bot.db.get_request_by_user_id_or_login(user_input)
-        logger.info(f"Found applications for user '{user_input}': {all_applications}")
+        logger.info(f"[System] - Found applications for '{user_input}': {len(all_applications)}.")
 
         if all_applications:
             await update.message.reply_text(f"✅ Найдены активные заявки ({len(all_applications)} шт.):")
@@ -368,7 +356,6 @@ class AdminPanelHandler:
         return await self._show_main_menu(update, context)
 
     def _format_application_info(self, app) -> str:
-        """Форматирует информацию о заявке для вывода."""
         return (
             f"<b>Заявка ID:</b> <code>{app['id']}</code>\n"
             f"<b>Пользователь:</b> @{app['username']} (<code>{app['user_id']}</code>)\n"
@@ -389,16 +376,16 @@ class AdminPanelHandler:
         )
 
     async def set_new_password(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
         self.bot.config.admin_password = update.message.text.strip()
         await self.bot.config.save()
-        logger.info(f"Admin {update.effective_user.id} updated the password.")
+        logger.info(f"[Aid] ({user.id}, {user.username}) - Updated the password.")
         await update.message.reply_text("✅ Пароль обновлён.")
         return await self._show_main_menu(update, context)
 
     async def toggle_bot_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Toggles the bot's enabled/disabled status."""
         query = update.callback_query
-
+        user = update.effective_user
         current_status = self.bot.config.bot_enabled
         new_status = not current_status
 
@@ -406,34 +393,35 @@ class AdminPanelHandler:
         await self.bot.config.save()
 
         logger.info(
-            f"Admin {update.effective_user.id} changed bot status to: {'ENABLED' if new_status else 'DISABLED'}")
+            f"[Aid] ({user.id}, {user.username}) - Changed bot status to: {'ENABLED' if new_status else 'DISABLED'}")
 
-        # Даем обратную связь админу
         await query.answer(f"Бот теперь {'включен' if new_status else 'выключен'}.")
 
-        # Обновляем меню, чтобы показать новое название кнопки
         return await self._show_main_menu(update, context)
 
     async def set_exchange_rate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
         try:
             new_rate = float(update.message.text.strip().replace(',', '.'))
             self.bot.config.exchange_rate = new_rate
             await self.bot.config.save()
             logger.info(
-                f"Admin {update.effective_user.id} updated the exchange rate to: {new_rate}")
+                f"[Aid] ({user.id}, {user.username}) - Updated the exchange rate to: {new_rate}")
             await update.message.reply_text("✅ Курс обновлён.")
         except ValueError:
             await update.message.reply_text("❌ Ошибка: введите корректное число.")
         return await self._show_main_menu(update, context)
 
     async def set_wallet(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
         self.bot.config.wallet_address = update.message.text.strip()
         await self.bot.config.save()
-        logger.info(f"Admin {update.effective_user.id} updated the wallet address.")
+        logger.info(f"[Aid] ({user.id}, {user.username}) - Updated the wallet address.")
         await update.message.reply_text("✅ Кошелёк обновлён.")
         return await self._show_main_menu(update, context)
 
     async def set_support_contact(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
         new_support = update.message.text.strip()
         if not re.fullmatch(r"[A-Za-z0-9@._\- ]+", new_support):
             await update.message.reply_text("❌ Недопустимый формат. Используйте латиницу, цифры, @ . _ -")
@@ -441,19 +429,18 @@ class AdminPanelHandler:
         else:
             self.bot.config.support_contact = new_support
             await self.bot.config.save()
-            logger.info(f"Admin {update.effective_user.id} updated the support contact.")
+            logger.info(f"[Aid] ({user.id}, {user.username}) - Updated the support contact.")
             await update.message.reply_text("✅ Контакт поддержки обновлён.")
         return await self._show_main_menu(update, context)
 
     async def close(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         if user.id in self.bot.config.admin_ids:
-            logger.info(f"Admin {user.id} closed the admin panel.")
+            logger.info(f"[Aid] ({user.id}, {user.username}) - Closed the admin panel.")
             await update.message.reply_text("🔒 Админ-панель закрыта.")
         return ConversationHandler.END
 
     def setup_handlers(self, application):
-        """Creates and registers the handlers for the admin panel."""
         admin_conversation_handler = ConversationHandler(
             entry_points=[CommandHandler('a', self.start)],
             states={

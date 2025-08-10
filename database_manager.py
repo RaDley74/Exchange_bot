@@ -27,16 +27,16 @@ class DatabaseManager:
             self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
             # Use Row factory to access columns by name
             self._conn.row_factory = sqlite3.Row
-            logger.info("Successfully connected to the database.")
+            logger.info("[System] - Successfully connected to the database.")
         except sqlite3.Error as e:
-            logger.error(f"Database connection failed: {e}")
+            logger.error(f"[System] - Database connection error: {e}")
             raise
 
     def close(self):
         """Closes the database connection."""
         if self._conn:
             self._conn.close()
-            logger.info("Database connection closed.")
+            logger.info("[System] - Database connection closed.")
 
     def _add_missing_columns(self):
         """Adds missing columns to the exchange_requests table for backward compatibility."""
@@ -47,11 +47,11 @@ class DatabaseManager:
 
             if 'card_number' not in columns:
                 cursor.execute("ALTER TABLE exchange_requests ADD COLUMN card_number TEXT;")
-                logger.info("Successfully added 'card_number' column to 'exchange_requests' table.")
+                logger.info("[System] - Successfully added 'card_number' column to 'exchange_requests' table.")
 
             self._conn.commit()
         except sqlite3.Error as e:
-            logger.error(f"Failed to add missing columns: {e}")
+            logger.error(f"[System] - Failed to add missing columns: {e}")
             self._conn.rollback()
 
     def setup_database(self):
@@ -91,11 +91,11 @@ class DatabaseManager:
             cursor = self._conn.cursor()
             cursor.execute(create_table_query)
             self._conn.commit()
-            logger.info("Database setup complete. 'exchange_requests' table is ready.")
+            logger.info("[System] - Database setup complete. Table 'exchange_requests' is ready.")
             # Add missing columns for older versions
             self._add_missing_columns()
         except sqlite3.Error as e:
-            logger.error(f"Failed to create table: {e}")
+            logger.error(f"[System] - Failed to create table: {e}")
             self._conn.rollback()
 
     def create_exchange_request(self, user, user_data):
@@ -130,10 +130,10 @@ class DatabaseManager:
             cursor.execute(query, params)
             self._conn.commit()
             request_id = cursor.lastrowid
-            logger.info(f"Created new exchange request with ID: {request_id} for user {user.id}")
+            logger.info(f"[Uid] ({user.id}, {user.username}) - Created a new exchange request with ID: {request_id}")
             return request_id
         except sqlite3.Error as e:
-            logger.error(f"Failed to create exchange request for user {user.id}: {e}")
+            logger.error(f"[System] - Failed to create exchange request for user {user.id}: {e}")
             self._conn.rollback()
             return None
 
@@ -146,8 +146,6 @@ class DatabaseManager:
         query = "SELECT * FROM exchange_requests WHERE id = ?"
         cursor = self._conn.cursor()
         cursor.execute(query, (request_id,))
-        # row = cursor.fetchone()
-        # print(f"Fetching request with ID: {dict(row)}")
         return cursor.fetchone()
 
     def get_request_by_user_id(self, user_id):
@@ -173,8 +171,6 @@ class DatabaseManager:
             cursor.execute(query, (user_id_or_login,))
         else:
             user_name = user_id_or_login.replace("@", "").strip()
-            # input(f"Fetching request for username: {user_name}")
-
             query = '''
             SELECT * FROM exchange_requests 
             WHERE username = ? 
@@ -182,9 +178,6 @@ class DatabaseManager:
             '''
             cursor = self._conn.cursor()
             cursor.execute(query, (user_name,))
-            # input(f"Fetching request for username: {user_name}")
-        # print(f"Fetching request for user ID or login: {cursor.fetchone()}")
-
         return cursor.fetchall()
 
     def update_request_status(self, request_id, status):
@@ -194,9 +187,9 @@ class DatabaseManager:
             cursor = self._conn.cursor()
             cursor.execute(query, (status, request_id))
             self._conn.commit()
-            logger.info(f"Updated status for request {request_id} to '{status}'.")
+            logger.info(f"[System] - Updated status for request {request_id} to '{status}'.")
         except sqlite3.Error as e:
-            logger.error(f"Failed to update status for request {request_id}: {e}")
+            logger.error(f"[System] - Failed to update status for request {request_id}: {e}")
             self._conn.rollback()
 
     def update_request_data(self, request_id, data: dict):
@@ -205,7 +198,6 @@ class DatabaseManager:
         :param request_id: The ID of the request to update.
         :param data: A dictionary where keys are column names and values are the new values.
         """
-        # Exclude primary key from updates
         if 'id' in data:
             del data['id']
 
@@ -218,7 +210,7 @@ class DatabaseManager:
             cursor = self._conn.cursor()
             cursor.execute(query, tuple(values))
             self._conn.commit()
-            logger.info(f"Updated data for request {request_id}. Fields: {list(data.keys())}")
+            logger.info(f"[System] - Updated data for request {request_id}. Fields: {list(data.keys())}")
         except sqlite3.Error as e:
-            logger.error(f"Failed to update data for request {request_id}: {e}")
+            logger.error(f"[System] - Failed to update data for request {request_id}: {e}")
             self._conn.rollback()

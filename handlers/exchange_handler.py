@@ -58,16 +58,15 @@ class ExchangeHandler:
         if not self.bot.config.bot_enabled:
             await update.message.reply_text("🔧🤖 Бот на техническом обслуживании. \n\n⏳ Пожалуйста, попробуйте позже.")
             return
-        """Handles the /start command when there is no active conversation."""
         user = update.effective_user
 
         check_request = self.check_if_request_exists(update, context)
         if check_request:
             logger.info(
-                f"User {user.id} ({user.username}) has already an active request({check_request['id']}).")
+                f"[Uid] ({user.id}, {user.username}) - Already has an active request ({check_request['id']}).")
             await update.message.reply_text(f"🚫 У вас уже есть активная заявка #{check_request['id']} в статусе: {self.translate_status(check_request['status'])}. \n\n 🛠️Если столкнулись с проблемой, напишите: {self.bot.config.support_contact}")
             return
-        logger.info(f"User {user.id} ({user.username}) started the bot.")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Started the bot.")
         await self.main_menu(update, context)
 
     def check_if_request_exists(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -82,7 +81,7 @@ class ExchangeHandler:
             await update.message.reply_text("🔧🤖 Бот на техническом обслуживании. \n\n⏳ Пожалуйста, попробуйте позже.")
             return
         logger.info(
-            f"User {user.id} ({user.username}) used /start to cancel or restart the conversation.")
+            f"[Uid] ({user.id}, {user.username}) - Used /start to cancel or restart the dialog.")
         await self.main_menu(update, context)
         return ConversationHandler.END
 
@@ -92,7 +91,7 @@ class ExchangeHandler:
         await query.answer()
         data = query.data
         user = query.from_user
-        logger.info(f"User {user.id} ({user.username}) selected menu option: {data}")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Selected menu option: {data}")
 
         if data == 'rate':
             keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]]
@@ -121,8 +120,6 @@ class ExchangeHandler:
 
         return ConversationHandler.END
 
-    # --- ConversationHandler methods for the exchange process (All methods from here are changed) ---
-
     async def choosing_currency(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
@@ -132,11 +129,11 @@ class ExchangeHandler:
         if data == 'currency_usdt':
             context.user_data['currency'] = 'USDT'
             logger.info(
-                f"User {user.id} ({user.username}) chose currency: {context.user_data['currency']}")
+                f"[Uid] ({user.id}, {user.username}) - Chose currency: {context.user_data['currency']}")
             await query.edit_message_text(f"💰 Введите сумму для обмена (в {context.user_data['currency']}):")
             return self.ENTERING_AMOUNT
         elif data == 'back_to_menu':
-            logger.info(f"User {user.id} ({user.username}) returned to the main menu.")
+            logger.info(f"[Uid] ({user.id}, {user.username}) - Returned to the main menu.")
             await self.main_menu(update, context)
             return ConversationHandler.END
         return ConversationHandler.END
@@ -158,7 +155,7 @@ class ExchangeHandler:
         sum_uah = amount * self.bot.config.exchange_rate
         context.user_data['sum_uah'] = sum_uah
         logger.info(
-            f"User {user.id} entered amount: {amount} {currency}. Calculated sum: {sum_uah:.2f} UAH.")
+            f"[Uid] ({user.id}, {user.username}) - Entered amount: {amount} {currency}. Calculated sum: {sum_uah:.2f} UAH.")
 
         await update.message.reply_text(
             f"✅ Хорошо! К оплате: {sum_uah:.2f} UAH.\n\n🏦 Пожалуйста, укажите название банка."
@@ -166,55 +163,64 @@ class ExchangeHandler:
         return self.ENTERING_BANK_NAME
 
     async def entering_bank_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
         bank_name = update.message.text.strip()
         if not bank_name:
             await update.message.reply_text("Пожалуйста, введите корректное название банка.")
             return self.ENTERING_BANK_NAME
 
         context.user_data['bank_name'] = bank_name
-        logger.info(f"User {update.effective_user.id} entered bank: {bank_name}")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered bank: {bank_name}")
         await update.message.reply_text(
             f"🏦 Вы указали банк: {bank_name}\n\n💳 Введите IBAN:"
         )
         return self.ENTERING_CARD_DETAILS
 
     async def entering_card_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
         card_info = update.message.text.strip()
         if not card_info:
             await update.message.reply_text("Пожалуйста, введите корректный IBAN.")
             return self.ENTERING_CARD_DETAILS
 
         context.user_data['card_info'] = card_info
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered IBAN: {card_info}")
         await update.message.reply_text(f"💳 Вы указали IBAN: {card_info}\n\n🔢 Теперь введите номер карты:")
         return self.ENTERING_CARD_NUMBER
 
     async def entering_card_number(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
         card_number = update.message.text.strip()
         if not card_number:
             await update.message.reply_text("Пожалуйста, введите корректный номер карты.")
             return self.ENTERING_CARD_NUMBER
 
         context.user_data['card_number'] = card_number
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered card number: {card_number}")
         await update.message.reply_text(f"🔢 Вы указали номер карты: {card_number}\n\n👤 Укажите ФИО:")
         return self.ENTERING_FIO_DETAILS
 
     async def entering_fio_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
         fio = update.message.text.strip()
         if not fio:
             await update.message.reply_text("Пожалуйста, введите корректные ФИО.")
             return self.ENTERING_FIO_DETAILS
 
         context.user_data['fio'] = fio
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered full name: {fio}")
         await update.message.reply_text(f"👤 Вы указали ФИО: {fio}\n\n🆔 Пожалуйста, введите ІПН/ЄДРПОУ:")
         return self.ENTERING_INN_DETAILS
 
     async def entering_inn_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
         inn = update.message.text.strip()
         if not inn:
             await update.message.reply_text("Пожалуйста, введите корректный ИНН.")
             return self.ENTERING_INN_DETAILS
 
         context.user_data['inn'] = inn
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered INN: {inn}")
         amount = context.user_data['amount']
         currency = context.user_data['currency']
         sum_uah = context.user_data['sum_uah']
@@ -236,21 +242,17 @@ class ExchangeHandler:
         )
         return self.CONFIRMING_EXCHANGE
 
-    # --- The logic below is now heavily reliant on the database ---
-
     async def confirming_exchange(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
         data = query.data
 
         if data == 'send_exchange':
-            # Create the request in the database and get its ID
             request_id = self.bot.db.create_exchange_request(query.from_user, context.user_data)
             if not request_id:
                 await query.edit_message_text("❌ Произошла ошибка при создании заявки. Попробуйте снова.")
                 return ConversationHandler.END
 
-            # Now we pass the request_id to all related functions
             await self._process_standard_exchange(query, context, request_id)
             return ConversationHandler.END
 
@@ -273,7 +275,8 @@ class ExchangeHandler:
     async def _process_standard_exchange(self, query: Update, context: ContextTypes.DEFAULT_TYPE, request_id: int):
         user = query.from_user
         request_data = self.bot.db.get_request_by_id(request_id)
-        logger.info(f"Creating a standard exchange request ({request_id}) for user {user.id}.")
+        logger.info(
+            f"[Uid] ({user.id}, {user.username}) - Creating a standard exchange request (#{request_id}).")
 
         user_keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Я совершил(а) перевод",
@@ -295,13 +298,9 @@ class ExchangeHandler:
         await self._send_admin_notification(request_id)
 
     async def resend_messages_for_request(self, request_id: int):
-        """
-        Re-sends all relevant messages for a specific request to both the user and admins.
-        This is used to restore or update messages after a manual status change.
-        """
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
-            raise ValueError(f"Request with ID {request_id} not found in database.")
+            raise ValueError(f"Request with ID {request_id} not found in the database.")
 
         status = request_data['status']
         user_id = request_data['user_id']
@@ -309,7 +308,6 @@ class ExchangeHandler:
         user_keyboard = None
         new_user_message_id = None
 
-        # Determine the user message based on the current status
         if status == 'awaiting trx transfer':
             user_text = f"🙏 Спасибо за заявку #{request_id}!\n\n" \
                 "🏦 Ожидайте сообщения об успешном переводе TRX ✅"
@@ -347,7 +345,6 @@ class ExchangeHandler:
                 "🙏 Спасибо за использование нашего сервиса! 🤝\n\n" \
                 "✅ Вы подтвердили получение."
 
-        # Send the message to the user if it was formed
         if user_text:
             try:
                 msg = await self.bot.application.bot.send_message(
@@ -359,19 +356,19 @@ class ExchangeHandler:
                 new_user_message_id = msg.message_id
             except Exception as e:
                 logger.error(
-                    f"Could not send restoration message to user {user_id} for request #{request_id}: {e}")
+                    f"[System] - Failed to send restoration message to user {user_id} for request #{request_id}: {e}")
 
-        # Regenerate the admin message
         await self._send_admin_notification(request_id, is_restoration=True)
 
-        # Update the user message ID in the database if it was sent
         if new_user_message_id:
             self.bot.db.update_request_data(request_id, {'user_message_id': new_user_message_id})
 
     async def confirming_exchange_trx(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
+        user = query.from_user
         if query.data == 'send_transfer_trx':
+            logger.info(f"[Uid] ({user.id}, {user.username}) - Confirmed the TRX request.")
             await query.edit_message_text(
                 "✅ Вы подтвердили запрос на TRX.\n\n📬 Пожалуйста, укажите ваш TRX-кошелек:",
                 parse_mode='Markdown'
@@ -383,11 +380,13 @@ class ExchangeHandler:
         return ConversationHandler.END
 
     async def entering_trx_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
         trx_address = update.message.text.strip()
         if not trx_address:
             await update.message.reply_text("Пожалуйста, введите корректный адрес.")
             return self.ENTERING_TRX_ADDRESS
 
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered TRX address.")
         context.user_data['trx_address'] = trx_address
         amount = context.user_data['amount']
         final_amount = amount - 15
@@ -410,13 +409,16 @@ class ExchangeHandler:
     async def final_confirming_exchange_trx(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
+        user = query.from_user
 
         if query.data == 'send_exchange_with_trx':
-            request_id = self.bot.db.create_exchange_request(query.from_user, context.user_data)
+            request_id = self.bot.db.create_exchange_request(user, context.user_data)
             if not request_id:
                 await query.edit_message_text("❌ Произошла ошибка при создании заявки. Попробуйте снова.")
                 return ConversationHandler.END
 
+            logger.info(
+                f"[Uid] ({user.id}, {user.username}) - Creating an exchange request with TRX (#{request_id}).")
             msg = await query.message.chat.send_message(
                 f"🙏 Спасибо за заявку #{request_id}!\n\n"
                 "🏦 Ожидайте сообщения об успешном переводе TRX ✅",
@@ -437,6 +439,9 @@ class ExchangeHandler:
         query = update.callback_query
         await query.answer()
         request_id = int(query.data.split('_')[-1])
+        user = query.from_user
+        logger.info(
+            f"[Uid] ({user.id}, {user.username}) - Confirmed the transfer for request #{request_id}, requesting hash.")
         context.user_data['request_id'] = request_id
         await query.edit_message_text(text="✍️ Пожалуйста, отправьте хэш вашей транзакции:")
         return self.ENTERING_HASH
@@ -444,22 +449,24 @@ class ExchangeHandler:
     async def process_hash(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         submitted_hash = update.message.text
         request_id = context.user_data.get('request_id')
+        user = update.effective_user
+
+        logger.info(
+            f"[Uid] ({user.id}, {user.username}) - Provided hash for request #{request_id}.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
             await update.message.reply_text("Произошла ошибка сессии. Начните сначала: /start")
             return ConversationHandler.END
 
-        # Update hash in DB
         self.bot.db.update_request_data(request_id, {'transaction_hash': submitted_hash})
         self.bot.db.update_request_status(request_id, 'awaiting confirmation')
 
-        # Re-fetch data to get the latest state
         request_data = self.bot.db.get_request_by_id(request_id)
 
         base_admin_text, _ = self._prepare_admin_notification(request_data)
         final_admin_text = base_admin_text + \
-            f"\n\n✅2️⃣ Пользователь подтвердил перевод {request_data['amount_currency']} {request_data['currency']}. Hash: `{submitted_hash}`"
+            f"\n\n✅2️⃣ Пользователь подтвердил перевод {request_data['amount_currency']} {request_data['currency']}. \n\n 🔒 Hash: `{submitted_hash}`"
 
         admin_keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Средства получены",
@@ -471,12 +478,14 @@ class ExchangeHandler:
         await update.message.reply_text("✅ Спасибо, ваш хэш получен и отправлен на проверку.")
         return ConversationHandler.END
 
-    # --- Admin Callback Handlers (all updated to use request_id) ---
-
     async def handle_transfer_confirmation_trx(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
         request_id = int(query.data.split('_')[-1])
+        admin_user = query.from_user
+        logger.info(
+            f"[Aid] ({admin_user.id}, {admin_user.username}) - Confirmed TRX transfer for request #{request_id}.")
+
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
             await query.answer("Заявка не найдена!", show_alert=True)
@@ -510,6 +519,10 @@ class ExchangeHandler:
         query = update.callback_query
         await query.answer()
         request_id = int(query.data.split('_')[-1])
+        admin_user = query.from_user
+        logger.info(
+            f"[Aid] ({admin_user.id}, {admin_user.username}) - Confirmed payment receipt for request #{request_id}.")
+
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
             return
@@ -535,6 +548,10 @@ class ExchangeHandler:
         query = update.callback_query
         await query.answer()
         request_id = int(query.data.split('_')[-1])
+        admin_user = query.from_user
+        logger.info(
+            f"[Aid] ({admin_user.id}, {admin_user.username}) - Confirmed funds transfer to the client for request #{request_id}.")
+
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
             return
@@ -578,6 +595,8 @@ class ExchangeHandler:
         await query.answer()
         request_id = int(query.data.split('_')[-1])
         admin_user = query.from_user
+        logger.info(
+            f"[Aid] ({admin_user.id}, {admin_user.username}) - Declined request #{request_id}.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -600,6 +619,10 @@ class ExchangeHandler:
         query = update.callback_query
         await query.answer()
         request_id = int(query.data.split('_')[-1])
+        user = query.from_user
+        logger.info(
+            f"[Uid] ({user.id}, {user.username}) - Confirmed receipt of funds for request #{request_id}.")
+
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
             await query.edit_message_text("⏳ Сессия истекла. \n🔄 Пожалуйста, начните заново. \n🚀 /start", reply_markup=None)
@@ -607,13 +630,11 @@ class ExchangeHandler:
 
         self.bot.db.update_request_status(request_id, 'completed')
 
-        # Update the admin message
         updated_text, _ = self._prepare_admin_notification(
             self.bot.db.get_request_by_id(request_id))
         updated_text += "\n\n✅🛑 Пользователь подтвердил получение средств. ЗАЯВКА ЗАВЕРШЕНА. 🛑✅"
         await self._update_admin_messages(request_id, updated_text, None)
 
-        # Remove the button for the user
         await query.edit_message_text(
             text=f"✅ Перевод средств по заявке #{request_id} вам выполнен успешно. 💸\n\n"
             "🙏 Спасибо за использование нашего сервиса! 🤝\n\n"
@@ -622,21 +643,14 @@ class ExchangeHandler:
             parse_mode='Markdown'
         )
 
-    # --- Helper Methods ---
-
     def _prepare_admin_notification(self, request_data):
-        """Prepares the text and keyboard for the administrator notification."""
-        username_display = 'нет'
-        # if request_data['username']:
-        #     username_display = request_data['username'].replace('_', '\\_').replace(
-        #         '*', '\\*').replace('`', '\\`').replace('[', '\\[')
-        username_display_sharp = request_data['username']
-        username_display = username_display_sharp.replace('\\', '\\\\') \
-            .replace('_', '\\_') \
-            .replace('*', '\\*') \
-            .replace('`', '\\`')
+        username_display = 'none'
+        if request_data['username']:
+            username_display = request_data['username'].replace('_', '\\_').replace(
+                '*', '\\*').replace('`', '\\`').replace('[', '\\[')
 
         def sanitize_for_code_block(text):
+            # Simple sanitization for Markdown code blocks.
             return str(text).replace('`', "'") if text else ""
 
         bank_name_safe = sanitize_for_code_block(request_data['bank_name'])
@@ -663,7 +677,6 @@ class ExchangeHandler:
                      f"💱 {request_data['amount_currency']} {request_data['currency']} → {request_data['amount_uah']:.2f} UAH\n\n"
                      f"{user_info_block}{transfer_details_block}")
 
-        # Default keyboard
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton(
                 "❌ Отказать", callback_data=f"decline_request_{request_data['id']}")
@@ -689,10 +702,6 @@ class ExchangeHandler:
         return base_text, keyboard
 
     async def _send_admin_notification(self, request_id, is_restoration=False):
-        """
-        Sends notifications to all administrators.
-        If is_restoration is True, it regenerates messages based on the current state.
-        """
         admin_ids = self.bot.config.admin_ids
         if not admin_ids:
             return
@@ -704,7 +713,6 @@ class ExchangeHandler:
         text, keyboard = self._prepare_admin_notification(request_data)
         status = request_data['status']
 
-        # Add stage-specific text and buttons
         if status == 'awaiting confirmation':
             text += f"\n\n✅2️⃣ Пользователь подтвердил перевод. Hash: `{request_data['transaction_hash']}`"
             keyboard = InlineKeyboardMarkup([[
@@ -721,11 +729,11 @@ class ExchangeHandler:
                 InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
             ]])
         elif status == 'funds sent':
-            text += f"\n\n✅ Хэш: `{request_data.get('transaction_hash', 'Нет')}`"
+            text += f"\n\n✅ Хэш: `{getattr(request_data, "transaction_hash", None)}`"
             text += "\n\n✅4️⃣ Уведомление об отправке средств клиенту отправлено."
             keyboard = None
         elif status == 'completed':
-            text += f"\n\n✅ Хэш: `{request_data.get('transaction_hash', 'Нет')}`"
+            text += f"\n\n✅ Хэш: `{getattr(request_data, "transaction_hash", None)}`"
             text += "\n\n✅🛑 Пользователь подтвердил получение средств. ЗАЯВКА ЗАВЕРШЕНА. 🛑✅"
             keyboard = None
         elif status == 'declined':
@@ -741,24 +749,18 @@ class ExchangeHandler:
                 )
                 admin_message_ids[admin_id] = msg.message_id
             except Exception as e:
-                logger.error(f"Failed to send message to admin {admin_id}: {e}")
+                logger.error(f"[System] - Failed to send message to admin {admin_id}: {e}")
 
-        # Store message IDs as a JSON string in the database
         self.bot.db.update_request_data(
             request_id, {'admin_message_ids': json.dumps(admin_message_ids)})
 
     async def _update_admin_messages(self, request_id: int, text: str, reply_markup: InlineKeyboardMarkup):
-        """
-        Deletes old admin messages for a request and sends new ones with the updated status.
-        Also updates the stored message IDs in the database.
-        """
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
             logger.warning(
-                f"_update_admin_messages called for non-existent request_id {request_id}")
+                f"[System] - _update_admin_messages was called for a non-existent request #{request_id}")
             return
 
-        # 1. Delete old messages if their IDs are stored
         if request_data['admin_message_ids']:
             try:
                 old_admin_message_ids = json.loads(request_data['admin_message_ids'])
@@ -767,16 +769,16 @@ class ExchangeHandler:
                         await self.bot.application.bot.delete_message(chat_id=admin_id, message_id=message_id)
                     except Exception as e:
                         logger.warning(
-                            f"Could not delete old admin message {message_id} for admin {admin_id}: {e}")
+                            f"[System] - Failed to delete old message {message_id} for admin {admin_id}: {e}")
             except (json.JSONDecodeError, TypeError) as e:
                 logger.error(
-                    f"Failed to parse or process admin_message_ids for request #{request_id}: {e}")
+                    f"[System] - Failed to parse or process admin_message_ids for request #{request_id}: {e}")
 
-        # 2. Send new messages to all admins and collect their IDs
         admin_ids = self.bot.config.admin_ids
         new_admin_message_ids = {}
         if not admin_ids:
-            logger.warning("No admin IDs configured, cannot send/update admin messages.")
+            logger.warning(
+                "[System] - Admin IDs are not configured, cannot send/update admin messages.")
             self.bot.db.update_request_data(request_id, {'admin_message_ids': json.dumps({})})
             return
 
@@ -791,16 +793,13 @@ class ExchangeHandler:
                 new_admin_message_ids[admin_id] = msg.message_id
             except Exception as e:
                 logger.error(
-                    f"Failed to send updated message to admin {admin_id} for request #{request_id}: {e}")
+                    f"[System] - Failed to send updated message to admin {admin_id} for request #{request_id}: {e}")
 
-        # 3. Update the database with the new message IDs
         self.bot.db.update_request_data(
             request_id, {'admin_message_ids': json.dumps(new_admin_message_ids)}
         )
 
     def setup_handlers(self, application):
-        """Creates and registers all handlers related to the exchange process."""
-
         exchange_conv_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(
                 self.handle_menu_callback, pattern='^(exchange|rate|user_help|back_to_menu)$')],
@@ -833,7 +832,6 @@ class ExchangeHandler:
         application.add_handler(exchange_conv_handler)
         application.add_handler(hash_conv_handler)
 
-        # Regex patterns now match any number of digits for the request_id
         application.add_handler(CallbackQueryHandler(
             self.handle_decline_request, pattern=r'^decline_request_\d+'))
         application.add_handler(CallbackQueryHandler(
