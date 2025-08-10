@@ -534,7 +534,7 @@ class ExchangeHandler:
 
         updated_text, _ = self._prepare_admin_notification(
             self.bot.db.get_request_by_id(request_id))
-        updated_text += f"\n\n✅ Хэш: `{request_data['transaction_hash']}`"
+        updated_text += f"\n\n✅ Hash:`{request_data['transaction_hash']}`"
         updated_text += f"\n\n✅3️⃣ Уведомление о получении средств отправлено."
 
         keyboard = InlineKeyboardMarkup([[
@@ -573,7 +573,7 @@ class ExchangeHandler:
 
         updated_text, _ = self._prepare_admin_notification(
             self.bot.db.get_request_by_id(request_id))
-        updated_text += f"\n\n✅ Хэш: `{request_data['transaction_hash']}`"
+        updated_text += f"\n\n✅ Hash: `{request_data['transaction_hash']}`"
         updated_text += "\n\n✅4️⃣ Уведомление об отправке средств клиенту отправлено."
         await self._update_admin_messages(request_id, updated_text, None)
 
@@ -721,7 +721,7 @@ class ExchangeHandler:
                 InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
             ]])
         elif status == 'payment received':
-            text += f"\n\n✅ Хэш: `{getattr(request_data, "transaction_hash", None)}`"
+            text += f"\n\n✅ Hash: `{getattr(request_data, "transaction_hash", None)}`"
             text += f"\n\n✅3️⃣ Уведомление о получении средств отправлено."
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("✅ Перевод клиенту сделан",
@@ -729,11 +729,11 @@ class ExchangeHandler:
                 InlineKeyboardButton("❌ Отказать", callback_data=f"decline_request_{request_id}")
             ]])
         elif status == 'funds sent':
-            text += f"\n\n✅ Хэш: `{getattr(request_data, "transaction_hash", None)}`"
+            text += f"\n\n✅ Hash: `{getattr(request_data, "transaction_hash", None)}`"
             text += "\n\n✅4️⃣ Уведомление об отправке средств клиенту отправлено."
             keyboard = None
         elif status == 'completed':
-            text += f"\n\n✅ Хэш: `{getattr(request_data, "transaction_hash", None)}`"
+            text += f"\n\n✅ Hash: `{getattr(request_data, "transaction_hash", None)}`"
             text += "\n\n✅🛑 Пользователь подтвердил получение средств. ЗАЯВКА ЗАВЕРШЕНА. 🛑✅"
             keyboard = None
         elif status == 'declined':
