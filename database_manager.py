@@ -49,6 +49,12 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE exchange_requests ADD COLUMN card_number TEXT;")
                 logger.info("[System] - Successfully added 'card_number' column to 'exchange_requests' table.")
 
+            # --- START OF CHANGE ---
+            if 'exchange_rate' not in columns:
+                cursor.execute("ALTER TABLE exchange_requests ADD COLUMN exchange_rate REAL;")
+                logger.info("[System] - Successfully added 'exchange_rate' column to 'exchange_requests' table.")
+            # --- END OF CHANGE ---
+
             self._conn.commit()
         except sqlite3.Error as e:
             logger.error(f"[System] - Failed to add missing columns: {e}")
@@ -64,6 +70,7 @@ class DatabaseManager:
 
         # The 'status' column is crucial for tracking the request's progress.
         # 'admin_message_ids' will store a JSON string of a dictionary.
+        # --- START OF CHANGE ---
         create_table_query = """
         CREATE TABLE IF NOT EXISTS exchange_requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,6 +80,7 @@ class DatabaseManager:
             currency TEXT,
             amount_currency REAL,
             amount_uah REAL,
+            exchange_rate REAL,
             bank_name TEXT,
             card_info TEXT,
             card_number TEXT,
@@ -87,6 +95,7 @@ class DatabaseManager:
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """
+        # --- END OF CHANGE ---
         try:
             cursor = self._conn.cursor()
             cursor.execute(create_table_query)
@@ -105,10 +114,11 @@ class DatabaseManager:
         :param user_data: A dictionary with all the request details.
         :return: The ID of the newly created request.
         """
+        # --- START OF CHANGE ---
         query = """
         INSERT INTO exchange_requests 
-        (user_id, username, status, currency, amount_currency, amount_uah, bank_name, card_info, card_number, fio, inn, needs_trx, trx_address)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (user_id, username, status, currency, amount_currency, amount_uah, exchange_rate, bank_name, card_info, card_number, fio, inn, needs_trx, trx_address)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             user.id,
@@ -117,6 +127,7 @@ class DatabaseManager:
             user_data.get('currency'),
             user_data.get('amount'),
             user_data.get('sum_uah'),
+            user_data.get('exchange_rate'), # Save the rate used for this transaction
             user_data.get('bank_name'),
             user_data.get('card_info'),
             user_data.get('card_number'),
@@ -125,6 +136,7 @@ class DatabaseManager:
             'trx_address' in user_data,
             user_data.get('trx_address')
         )
+        # --- END OF CHANGE ---
         try:
             cursor = self._conn.cursor()
             cursor.execute(query, params)

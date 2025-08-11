@@ -113,6 +113,7 @@ class AdminPanelHandler:
                     reply_markup=reply_markup
                 )
         else:
+            await update.message.delete()
             await update.message.reply_text(text, reply_markup=reply_markup)
 
         return self.ADMIN_MENU

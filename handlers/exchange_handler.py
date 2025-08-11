@@ -153,12 +153,18 @@ class ExchangeHandler:
             await update.message.reply_text("Пожалуйста, введите корректное число.")
             return self.ENTERING_AMOUNT
 
+        # --- START OF CHANGE ---
+        current_rate = self.bot.config.exchange_rate
+        # Store the rate in the user's session data
+        context.user_data['exchange_rate'] = current_rate
+
         context.user_data['amount'] = amount
         currency = context.user_data.get('currency', 'USDT')
-        sum_uah = amount * self.bot.config.exchange_rate
+        sum_uah = amount * current_rate
         context.user_data['sum_uah'] = sum_uah
         logger.info(
-            f"[Uid] ({user.id}, {user.username}) - Entered amount: {amount} {currency}. Calculated sum: {sum_uah:.2f} UAH.")
+            f"[Uid] ({user.id}, {user.username}) - Entered amount: {amount} {currency}. Rate: {current_rate}. Calculated sum: {sum_uah:.2f} UAH.")
+        # --- END OF CHANGE ---
 
         await update.message.reply_text(
             f"✅ Хорошо! К оплате: {sum_uah:.2f} UAH.\n\n🏦 Пожалуйста, укажите название банка."
@@ -400,9 +406,17 @@ class ExchangeHandler:
 
         logger.info(f"[Uid] ({user.id}, {user.username}) - Entered TRX address.")
         context.user_data['trx_address'] = trx_address
+
+        # --- START OF CHANGE ---
+        # Use the rate stored in the session, not the global config rate
+        rate_for_this_request = context.user_data['exchange_rate']
         amount = context.user_data['amount']
         final_amount = amount - 15
-        final_sum_uah = final_amount * self.bot.config.exchange_rate
+        final_sum_uah = final_amount * rate_for_this_request
+        # --- END OF CHANGE ---
+
+        context.user_data['final_amount'] = final_amount
+        context.user_data['final_sum_uah'] = final_sum_uah
 
         keyboard = [
             [InlineKeyboardButton("✅ Отправить", callback_data='send_exchange_with_trx')],
@@ -862,7 +876,11 @@ class ExchangeHandler:
         trx_address_safe = sanitize_for_code_block(request_data['trx_address'])
 
         status_text = self.translate_status(request_data['status'])
-        title = f"📥 Заявка #{request_data['id']} (Статус: {status_text})"
+        # --- START OF CHANGE ---
+        # Display the rate at which the request was created
+        rate_info = f"(Курс: {request_data['exchange_rate']})" if request_data['exchange_rate'] else ""
+        title = f"📥 Заявка #{request_data['id']} {rate_info} (Статус: {status_text})"
+        # --- END OF CHANGE ---
 
         user_info_block = (f"👤 Пользователь:\n"
                            f"🆔 ID: `{request_data['user_id']}`\n"
@@ -884,9 +902,13 @@ class ExchangeHandler:
         ]])
 
         if request_data['needs_trx']:
+            # --- START OF CHANGE ---
+            # Use the rate from the request to calculate the final UAH amount
+            rate_for_this_request = request_data['exchange_rate'] or self.bot.config.exchange_rate
             amount, sum_uah = request_data['amount_currency'], request_data['amount_uah']
             final_amount = amount - 15
-            final_sum_uah = final_amount * self.bot.config.exchange_rate
+            final_sum_uah = final_amount * rate_for_this_request
+            # --- END OF CHANGE ---
             base_text = (f"{title} (с TRX)\n\n"
                          f"💱 {amount} {request_data['currency']} → {sum_uah:.2f} UAH\n"
                          f"💵 После вычета TRX: {final_amount} {request_data['currency']} → {final_sum_uah:.2f} UAH\n\n"
