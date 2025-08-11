@@ -7,12 +7,14 @@ import warnings
 
 from telegram.ext import ApplicationBuilder
 
-# Import our new classes
+# Import our classes
 from config_manager import ConfigManager
-# --- Import the new DatabaseManager ---
 from database_manager import DatabaseManager
 from handlers.admin_handler import AdminPanelHandler
 from handlers.exchange_handler import ExchangeHandler
+# --- START OF CHANGE ---
+from handlers.user_cabinet_handler import UserCabinetHandler
+# --- END OF CHANGE ---
 
 # --- Logging Setup ---
 
@@ -41,23 +43,22 @@ class Bot:
     def __init__(self):
         logger.info("[System] - Initializing the bot...")
 
-        # 1. Create and load the configuration
         self.config = ConfigManager()
         self.config.load()
 
-        # 2. --- Initialize the Database ---
-        # Instead of an in-memory dictionary, we now use our persistent database.
         self.db = DatabaseManager()
         self.db.connect()
-        self.db.setup_database()  # Creates tables if they don't exist
+        self.db.setup_database()
 
-        # 3. Create the PTB application
         self.application = ApplicationBuilder().token(self.config.token).build()
 
-        # 4. Create instances of our handlers, passing them `self` (the Bot instance)
-        #    to provide access to config and now the database.
+        # --- START OF CHANGE ---
+        # Create instances of our handlers, passing them `self` (the Bot instance)
+        # to provide access to config, db, and other handlers if needed.
         self.admin_handler = AdminPanelHandler(self)
         self.exchange_handler = ExchangeHandler(self)
+        self.user_cabinet_handler = UserCabinetHandler(self)
+        # --- END OF CHANGE ---
 
     def setup_handlers(self):
         """
@@ -65,6 +66,9 @@ class Bot:
         """
         self.admin_handler.setup_handlers(self.application)
         self.exchange_handler.setup_handlers(self.application)
+        # --- START OF CHANGE ---
+        self.user_cabinet_handler.setup_handlers(self.application)
+        # --- END OF CHANGE ---
         logger.info("[System] - Handlers have been successfully set up.")
 
     def run(self):
@@ -76,7 +80,6 @@ class Bot:
             logger.info("[System] - Bot is running and ready to work...")
             self.application.run_polling()
         finally:
-            # --- Ensure the database connection is closed gracefully ---
             self.db.close()
 
 
