@@ -12,8 +12,9 @@ from config_manager import ConfigManager
 from database_manager import DatabaseManager
 from handlers.admin_handler import AdminPanelHandler
 from handlers.exchange_handler import ExchangeHandler
-# --- START OF CHANGE ---
 from handlers.user_cabinet_handler import UserCabinetHandler
+# --- START OF CHANGE ---
+from handlers.referral_handler import ReferralHandler
 # --- END OF CHANGE ---
 
 # --- Logging Setup ---
@@ -58,6 +59,7 @@ class Bot:
         self.admin_handler = AdminPanelHandler(self)
         self.exchange_handler = ExchangeHandler(self)
         self.user_cabinet_handler = UserCabinetHandler(self)
+        self.referral_handler = ReferralHandler(self)  # Add this line
         # --- END OF CHANGE ---
 
     def setup_handlers(self):
@@ -66,8 +68,9 @@ class Bot:
         """
         self.admin_handler.setup_handlers(self.application)
         self.exchange_handler.setup_handlers(self.application)
-        # --- START OF CHANGE ---
         self.user_cabinet_handler.setup_handlers(self.application)
+        # --- START OF CHANGE ---
+        self.referral_handler.setup_handlers(self.application)  # Add this line
         # --- END OF CHANGE ---
         logger.info("[System] - Handlers have been successfully set up.")
 

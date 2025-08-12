@@ -11,7 +11,55 @@ class DatabaseManager:
     """
     Manages all database operations for the bot.
     Uses SQLite to store and retrieve exchange requests and user profiles.
+    This version includes an automatic schema verification to add missing columns.
     """
+
+    # Определяем "идеальную" схему для каждой таблицы.
+    # Ключ - имя таблицы, значение - словарь, где ключ - имя столбца, а значение - его тип и ограничения.
+    # Это центральное место для определения структуры таблиц.
+    TABLE_SCHEMAS = {
+        'exchange_requests': {
+            'id': 'INTEGER PRIMARY KEY AUTOINCREMENT',
+            'user_id': 'INTEGER NOT NULL',
+            'username': 'TEXT',
+            'status': 'TEXT NOT NULL',
+            'currency': 'TEXT',
+            'amount_currency': 'REAL',
+            'amount_uah': 'REAL',
+            'exchange_rate': 'REAL',
+            'bank_name': 'TEXT',
+            'card_info': 'TEXT',
+            'card_number': 'TEXT',
+            'fio': 'TEXT',
+            'inn': 'TEXT',
+            'trx_address': 'TEXT',
+            'needs_trx': 'BOOLEAN DEFAULT 0',
+            'transaction_hash': 'TEXT',
+            'admin_message_ids': 'TEXT',
+            'user_message_id': 'INTEGER',
+            'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+            'updated_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
+        },
+        'user_profiles': {
+            'user_id': 'INTEGER PRIMARY KEY',
+            'username': 'TEXT',
+            'bank_name': 'TEXT',
+            'card_info': 'TEXT',
+            'card_number': 'TEXT',
+            'fio': 'TEXT',
+            'inn': 'TEXT',
+            'referral_balance': 'REAL DEFAULT 0.0',
+            'updated_at': 'TIMESTAMP'
+        },
+        'referrals': {
+            'id': 'INTEGER PRIMARY KEY AUTOINCREMENT',
+            'referrer_id': 'INTEGER NOT NULL',
+            'referred_id': 'INTEGER NOT NULL UNIQUE',
+            'referred_username': 'TEXT',
+            'is_credited': 'BOOLEAN DEFAULT 0',
+            'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
+        }
+    }
 
     def __init__(self, db_path=r'database/SafePay_bot.db'):
         """
@@ -37,85 +85,68 @@ class DatabaseManager:
             self._conn.close()
             logger.info("[System] - Database connection closed.")
 
-    def _add_missing_columns(self):
-        """Adds missing columns to the exchange_requests table for backward compatibility."""
+    def _verify_and_add_columns(self):
+        """
+        Проверяет каждую таблицу в схеме, находит отсутствующие столбцы и добавляет их.
+        Это заменяет старые, специфические для каждой таблицы, функции _add_missing_columns.
+        """
         try:
             cursor = self._conn.cursor()
-            cursor.execute("PRAGMA table_info(exchange_requests);")
-            columns = [row['name'] for row in cursor.fetchall()]
+            for table_name, schema_columns in self.TABLE_SCHEMAS.items():
+                # Получаем информацию о существующих столбцах в таблице
+                cursor.execute(f"PRAGMA table_info({table_name});")
+                existing_columns = {row['name'] for row in cursor.fetchall()}
 
-            if 'card_number' not in columns:
-                cursor.execute("ALTER TABLE exchange_requests ADD COLUMN card_number TEXT;")
-                logger.info(
-                    "[System] - Successfully added 'card_number' column to 'exchange_requests' table.")
-
-            if 'exchange_rate' not in columns:
-                cursor.execute("ALTER TABLE exchange_requests ADD COLUMN exchange_rate REAL;")
-                logger.info(
-                    "[System] - Successfully added 'exchange_rate' column to 'exchange_requests' table.")
+                # Сравниваем с "идеальной" схемой и добавляем недостающие
+                for column_name, column_type in schema_columns.items():
+                    if column_name not in existing_columns:
+                        try:
+                            # 'PRIMARY KEY' и другие сложные ограничения не могут быть добавлены через ADD COLUMN,
+                            # но это не проблема, так как они будут созданы с помощью CREATE TABLE.
+                            # Эта команда сработает для всех остальных случаев.
+                            cursor.execute(
+                                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type};")
+                            logger.info(
+                                f"[System] - Schema migration: Successfully added column '{column_name}' to table '{table_name}'.")
+                        except sqlite3.OperationalError as e:
+                            # Логируем ошибку, но не прерываем процесс, чтобы другие столбцы могли быть добавлены
+                            logger.error(
+                                f"[System] - Could not add column '{column_name}' to '{table_name}'. It might have constraints not supported by ALTER TABLE (e.g., PRIMARY KEY). Error: {e}")
 
             self._conn.commit()
         except sqlite3.Error as e:
-            logger.error(f"[System] - Failed to add missing columns: {e}")
-            self._conn.rollback()
-
-    def _add_missing_profile_columns(self):
-        """Adds missing columns to the user_profiles table for backward compatibility."""
-        try:
-            cursor = self._conn.cursor()
-            cursor.execute("PRAGMA table_info(user_profiles);")
-            columns = [row['name'] for row in cursor.fetchall()]
-
-            if 'username' not in columns:
-                cursor.execute("ALTER TABLE user_profiles ADD COLUMN username TEXT;")
-                logger.info(
-                    "[System] - Successfully added 'username' column to 'user_profiles' table.")
-
-            self._conn.commit()
-        except sqlite3.Error as e:
-            logger.error(f"[System] - Failed to add missing columns to user_profiles: {e}")
+            logger.error(f"[System] - An error occurred during schema verification: {e}")
             self._conn.rollback()
 
     def setup_database(self):
         """
-        Creates the necessary tables if they don't exist.
-        Should be called once at bot startup.
+        Создает необходимые таблицы, если они не существуют, а затем проверяет
+        и добавляет все недостающие столбцы в соответствии с TABLE_SCHEMAS.
         """
         if not self._conn:
             self.connect()
 
-        create_exchange_table_query = """
-        CREATE TABLE IF NOT EXISTS exchange_requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, username TEXT, status TEXT NOT NULL,
-            currency TEXT, amount_currency REAL, amount_uah REAL, exchange_rate REAL, bank_name TEXT,
-            card_info TEXT, card_number TEXT, fio TEXT, inn TEXT, trx_address TEXT,
-            needs_trx BOOLEAN DEFAULT 0, transaction_hash TEXT, admin_message_ids TEXT,
-            user_message_id INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-        create_profiles_table_query = """
-        CREATE TABLE IF NOT EXISTS user_profiles (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            bank_name TEXT,
-            card_info TEXT,
-            card_number TEXT,
-            fio TEXT,
-            inn TEXT,
-            updated_at TIMESTAMP
-        );
-        """
         try:
             cursor = self._conn.cursor()
-            cursor.execute(create_exchange_table_query)
-            cursor.execute(create_profiles_table_query)
+            # 1. Создаем таблицы, если их нет. Это создаст базовую структуру и первичные ключи.
+            for table_name, schema_columns in self.TABLE_SCHEMAS.items():
+                # Собираем строку для создания таблицы из нашей схемы
+                columns_defs = [f"'{name}' {typedef}" for name, typedef in schema_columns.items()]
+                create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns_defs)});"
+                cursor.execute(create_table_query)
+
             self._conn.commit()
+            logger.info("[System] - Initial table creation check complete.")
+
+            # 2. Проверяем и добавляем все недостающие столбцы.
+            # Это делает миграцию базы данных автоматической.
+            self._verify_and_add_columns()
+
             logger.info(
-                "[System] - Database setup complete. Tables 'exchange_requests' and 'user_profiles' are ready.")
-            self._add_missing_columns()
-            self._add_missing_profile_columns()
+                "[System] - Database setup and schema verification complete. All tables are up-to-date.")
+
         except sqlite3.Error as e:
-            logger.error(f"[System] - Failed to create tables: {e}")
+            logger.error(f"[System] - Failed to setup database schema: {e}")
             self._conn.rollback()
 
     def create_exchange_request(self, user, user_data):
@@ -179,7 +210,6 @@ class DatabaseManager:
         operation = ""
         try:
             cursor = self._conn.cursor()
-            # Use a separate query to check existence, not relying on the public get_user_profile
             cursor.execute("SELECT 1 FROM user_profiles WHERE user_id = ?", (user_id,))
             exists = cursor.fetchone()
 
@@ -191,6 +221,8 @@ class DatabaseManager:
             else:
                 operation = "insert"
                 update_data['user_id'] = user_id
+                if 'referral_balance' not in update_data:
+                    update_data['referral_balance'] = 0.0
                 columns = ", ".join(update_data.keys())
                 placeholders = ", ".join(["?"] * len(update_data))
                 query = f"INSERT INTO user_profiles ({columns}, updated_at) VALUES ({placeholders}, CURRENT_TIMESTAMP)"
@@ -207,17 +239,16 @@ class DatabaseManager:
     def get_request_by_id(self, request_id):
         """
         Retrieves a single exchange request by its primary key ID.
-        Returns a dict-like Row object or None.
         """
         query = "SELECT * FROM exchange_requests WHERE id = ?"
         cursor = self._conn.cursor()
         cursor.execute(query, (request_id,))
-        return dict(cursor.fetchone())
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
     def get_request_by_user_id(self, user_id):
         """
         Retrieves an active exchange request for a given user ID.
-        Returns a dict-like Row object or None.
         """
         query = '''
         SELECT * FROM exchange_requests 
@@ -231,7 +262,6 @@ class DatabaseManager:
     def get_request_by_user_id_or_login(self, user_id_or_login):
         """
         Retrieves all active requests for a user by their ID or username.
-        Returns a list of dict-like Row objects.
         """
         if user_id_or_login.isdigit():
             query = '''
@@ -265,19 +295,13 @@ class DatabaseManager:
             logger.error(f"[System] - Failed to update status for request {request_id}: {e}")
             self._conn.rollback()
 
-    # --- START OF RESTORED METHOD ---
     def update_request_data(self, request_id, data: dict):
         """
         Updates multiple fields of a request.
-        :param request_id: The ID of the request to update.
-        :param data: A dictionary where keys are column names and values are the new values.
         """
         if 'id' in data:
             del data['id']
-
         if not data:
-            logger.warning(
-                f"[System] - update_request_data called with no data for request {request_id}.")
             return
 
         fields = ", ".join([f"{key} = ?" for key in data.keys()])
@@ -294,4 +318,66 @@ class DatabaseManager:
         except sqlite3.Error as e:
             logger.error(f"[System] - Failed to update data for request {request_id}: {e}")
             self._conn.rollback()
-    # --- END OF RESTORED METHOD ---
+
+    # --- Referral System Methods ---
+
+    def create_referral(self, referrer_id: int, referred_id: int, referred_username: str):
+        """Creates a new referral record."""
+        query = "INSERT INTO referrals (referrer_id, referred_id, referred_username) VALUES (?, ?, ?)"
+        try:
+            cursor = self._conn.cursor()
+            cursor.execute(query, (referrer_id, referred_id, referred_username))
+            self._conn.commit()
+        except sqlite3.IntegrityError:
+            logger.warning(
+                f"Attempt to create a duplicate referral record for referred_id: {referred_id}")
+        except sqlite3.Error as e:
+            logger.error(
+                f"Failed to create referral record for {referrer_id} -> {referred_id}: {e}")
+            self._conn.rollback()
+
+    def get_referral_by_referred_id(self, referred_id: int):
+        """Gets a referral record by the referred user's ID."""
+        query = "SELECT * FROM referrals WHERE referred_id = ?"
+        cursor = self._conn.cursor()
+        cursor.execute(query, (referred_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_referrals_by_referrer_id(self, referrer_id: int):
+        """Gets all referrals for a given user."""
+        query = "SELECT * FROM referrals WHERE referrer_id = ?"
+        cursor = self._conn.cursor()
+        cursor.execute(query, (referrer_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def update_referral_balance(self, user_id: int, amount_to_add: float):
+        """Updates a user's referral balance."""
+        query = "UPDATE user_profiles SET referral_balance = referral_balance + ? WHERE user_id = ?"
+        try:
+            cursor = self._conn.cursor()
+            cursor.execute(query, (amount_to_add, user_id))
+            self._conn.commit()
+            logger.info(f"Updated referral balance for user {user_id} by {amount_to_add}")
+        except sqlite3.Error as e:
+            logger.error(f"Failed to update referral balance for user {user_id}: {e}")
+            self._conn.rollback()
+
+    def update_referral_as_credited(self, referred_id: int):
+        """Marks a referral as credited."""
+        query = "UPDATE referrals SET is_credited = 1 WHERE referred_id = ?"
+        try:
+            cursor = self._conn.cursor()
+            cursor.execute(query, (referred_id,))
+            self._conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Failed to mark referral {referred_id} as credited: {e}")
+            self._conn.rollback()
+
+    def get_user_completed_request_count(self, user_id: int) -> int:
+        """Counts the number of completed requests for a user."""
+        query = "SELECT COUNT(*) FROM exchange_requests WHERE user_id = ? AND status = 'completed'"
+        cursor = self._conn.cursor()
+        cursor.execute(query, (user_id,))
+        result = cursor.fetchone()
+        return result[0] if result else 0

@@ -16,15 +16,12 @@ class ExchangeHandler:
     """
     Handles all logic related to the currency exchange process.
     """
-    # --- START OF CHANGE ---
-    # Conversation states are defined as class attributes for clarity
     (
         CHOOSING_CURRENCY, ENTERING_AMOUNT, ASK_USE_PROFILE_REQUISITES, ENTERING_BANK_NAME, ENTERING_CARD_DETAILS,
         ENTERING_CARD_NUMBER, ENTERING_FIO_DETAILS, ENTERING_INN_DETAILS, CONFIRMING_EXCHANGE,
         CONFIRMING_EXCHANGE_TRX, ENTERING_TRX_ADDRESS, FINAL_CONFIRMING_EXCHANGE_TRX,
         ENTERING_HASH, SELECTING_CANCELLATION_TYPE, AWAITING_REASON_TEXT,
-    ) = range(15)  # Increased range to 15
-    # --- END OF CHANGE ---
+    ) = range(15)
 
     def __init__(self, bot_instance):
         self.bot = bot_instance
@@ -40,6 +37,9 @@ class ExchangeHandler:
                 InlineKeyboardButton("🔐 Личный кабинет", callback_data='user_cabinet'),
                 InlineKeyboardButton("🛠 Помощь", callback_data='user_help'),
             ],
+            [
+                InlineKeyboardButton("🏆 Реферальная программа", callback_data='referral_program')
+            ]
         ]
         text = (
             "👋 Привет! Добро пожаловать в SafePay Bot 💱\n\n"
@@ -47,20 +47,28 @@ class ExchangeHandler:
             "🌟 Выбери раздел:"
         )
 
-        if update.callback_query:
-            if not update.callback_query.message:
-                return
-            await update.callback_query.answer()
-            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        query = update.callback_query
+        if query:
+            # Answer the callback query to remove the "loading" state on the button
+            await query.answer()
+            # Edit the message to show the main menu
+            # Check if the message still exists before editing
+            if query.message:
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         elif update.message:
+            # If called from a command like /start, send a new message
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE, called_from_referral: bool = False):
         """
         Handles the /start command. Ensures a user profile exists
         and then shows the main menu or active request status.
         """
         user = update.effective_user
+
+        if context.args and context.args[0].startswith('ref_') and not called_from_referral:
+            return await self.bot.referral_handler.handle_referral_start(update, context)
+
         logger.info(f"[Uid] ({user.id}, {user.username}) - Executed /start command.")
 
         self.bot.db.create_or_update_user_profile(user.id, {'username': user.username})
@@ -83,55 +91,56 @@ class ExchangeHandler:
         check_request = self.bot.db.get_request_by_user_id(user.id)
         return check_request if check_request is not None else None
 
-    async def cancel_and_restart(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Ends the current conversation and shows the main menu."""
+    async def cancel_and_return_to_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """
+        Universal function to end any conversation and show the main menu.
+        This function will be used as a fallback.
+        """
         user = update.effective_user
-        if not self.bot.config.bot_enabled:
-            await update.message.reply_text("🔧🤖 Бот на техническом обслуживании. \n\n⏳ Пожалуйста, попробуйте позже.")
-            return ConversationHandler.END
-
         logger.info(
-            f"[Uid] ({user.id}, {user.username}) - Used /start to cancel or restart the dialog.")
+            f"[Uid] ({user.id}, {user.username}) - Canceled or finished a conversation, returning to main menu.")
+        
+        
         await self.main_menu(update, context)
         return ConversationHandler.END
 
-    async def handle_menu_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handles main menu button presses, starting a conversation."""
+    # --- START OF REFACTOR ---
+
+    async def start_exchange_convo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Entry point ONLY for the exchange conversation.
+        """
         query = update.callback_query
         await query.answer()
-        data = query.data
         user = query.from_user
-        logger.info(f"[Uid] ({user.id}, {user.username}) - Selected menu option: {data}")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Started exchange conversation.")
 
-        if data == 'rate':
-            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]]
-            await query.edit_message_text(f"📉 Актуальный курс: 1 USDT = {self.bot.config.exchange_rate} UAH", reply_markup=InlineKeyboardMarkup(keyboard))
-            return ConversationHandler.END
+        context.user_data.clear()
+        keyboard = [
+            [InlineKeyboardButton("USDT", callback_data='currency_usdt')],
+            [InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]
+        ]
+        await query.edit_message_text("💱 Выберите валюту для обмена:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return self.CHOOSING_CURRENCY
 
-        elif data == 'exchange':
-            # Clear previous exchange data, but keep profile data if any
-            context.user_data.clear()
-            keyboard = [
-                [InlineKeyboardButton("USDT", callback_data='currency_usdt')],
-                [InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]
-            ]
-            await query.edit_message_text("💱 Выберите валюту для обмена:", reply_markup=InlineKeyboardMarkup(keyboard))
-            return self.CHOOSING_CURRENCY
+    async def show_rate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """A simple (non-conversation) handler to show the rate."""
+        query = update.callback_query
+        await query.answer()
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]]
+        await query.edit_message_text(f"📉 Актуальный курс: 1 USDT = {self.bot.config.exchange_rate} UAH", reply_markup=InlineKeyboardMarkup(keyboard))
 
-        elif data == 'user_help':
-            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]]
-            await query.edit_message_text(
-                f"🔧 Помощь: Напиши {self.bot.config.support_contact} по любым вопросам относительно бота.",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            return ConversationHandler.END
+    async def show_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """A simple (non-conversation) handler to show help info."""
+        query = update.callback_query
+        await query.answer()
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data='back_to_menu')]]
+        await query.edit_message_text(
+            f"🔧 Помощь: Напиши {self.bot.config.support_contact} по любым вопросам относительно бота.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
-        elif data == 'back_to_menu':
-            await self.main_menu(update, context)
-            return ConversationHandler.END
-
-        return ConversationHandler.END
-
+    # ... (the rest of your exchange handler methods like choosing_currency, entering_amount, etc., remain unchanged) ...
     async def choosing_currency(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
@@ -331,6 +340,7 @@ class ExchangeHandler:
             await self.main_menu(update, context)
             return ConversationHandler.END
         return ConversationHandler.END
+    # ... keep all other methods like _process_standard_exchange, resend_messages_for_request etc. the same
 
     async def _process_standard_exchange(self, query: Update, context: ContextTypes.DEFAULT_TYPE, request_id: int):
         user = query.from_user
@@ -806,6 +816,8 @@ class ExchangeHandler:
             return
 
         self.bot.db.update_request_status(request_id, 'completed')
+
+        await self.bot.referral_handler.credit_referrer(user.id)
         updated_text, _ = self._generate_admin_message_content(
             self.bot.db.get_request_by_id(request_id))
         await self._update_admin_messages(request_id, updated_text, None)
@@ -978,11 +990,10 @@ class ExchangeHandler:
         self.bot.db.update_request_data(
             request_id, {'admin_message_ids': json.dumps(new_admin_message_ids)})
 
-    # --- START OF CHANGE ---
     def setup_handlers(self, application):
+        # Conversation handler only for the exchange process
         exchange_conv_handler = ConversationHandler(
-            entry_points=[CallbackQueryHandler(
-                self.handle_menu_callback, pattern='^(exchange|rate|user_help|back_to_menu)$')],
+            entry_points=[CallbackQueryHandler(self.start_exchange_convo, pattern='^exchange$')],
             states={
                 self.CHOOSING_CURRENCY: [CallbackQueryHandler(self.choosing_currency, pattern='^(currency_usdt|back_to_menu)$')],
                 self.ENTERING_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_amount)],
@@ -997,19 +1008,25 @@ class ExchangeHandler:
                 self.ENTERING_TRX_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_trx_address)],
                 self.FINAL_CONFIRMING_EXCHANGE_TRX: [CallbackQueryHandler(self.final_confirming_exchange_trx, pattern='^(send_exchange_with_trx|back_to_menu)$')],
             },
-            fallbacks=[CommandHandler('start', self.cancel_and_restart)],
-            per_message=False
+            fallbacks=[
+                CommandHandler('start', self.cancel_and_return_to_menu),
+                CallbackQueryHandler(self.cancel_and_return_to_menu, pattern='^back_to_menu$')
+            ],
+            per_message=False,
+            # Allow other handlers to process updates if this conversation isn't active
+            block=False
         )
-    # --- END OF CHANGE ---
 
+        # Handler for entering the transaction hash
         hash_conv_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(
                 self.ask_for_hash, pattern=r'^user_confirms_sending_')],
             states={self.ENTERING_HASH: [MessageHandler(
                 filters.TEXT & ~filters.COMMAND, self.process_hash)]},
-            fallbacks=[CommandHandler('start', self.cancel_and_restart)],
+            fallbacks=[CommandHandler('start', self.cancel_and_return_to_menu)],
         )
 
+        # Handler for the admin-initiated cancellation flow
         cancellation_conv_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(
                 self.start_cancellation_flow, pattern=r'^decline_request_\d+')],
@@ -1026,9 +1043,18 @@ class ExchangeHandler:
             conversation_timeout=300
         )
 
+        # Add conversation handlers to the application
         application.add_handler(exchange_conv_handler)
         application.add_handler(hash_conv_handler)
         application.add_handler(cancellation_conv_handler)
+
+        # Add simple, non-conversation handlers for main menu buttons
+        application.add_handler(CallbackQueryHandler(self.show_rate, pattern='^rate$'))
+        application.add_handler(CallbackQueryHandler(self.show_help, pattern='^user_help$'))
+        # This handler is crucial: it catches 'back_to_menu' clicks when no conversation is active
+        application.add_handler(CallbackQueryHandler(self.main_menu, pattern='^back_to_menu$'))
+
+        # Add other standalone callback handlers for request status updates
         application.add_handler(CallbackQueryHandler(
             self.handle_payment_confirmation, pattern=r'^confirm_payment_\d+'))
         application.add_handler(CallbackQueryHandler(
@@ -1039,4 +1065,8 @@ class ExchangeHandler:
             self.handle_by_user_transfer_confirmation, pattern=r'^by_user_confirm_transfer_\d+'))
         application.add_handler(CallbackQueryHandler(
             self.cancel_request_by_user, pattern=r'^cancel_by_user_\d+'))
+
+        # The /start command handler
         application.add_handler(CommandHandler('start', self.start_command))
+
+    # --- END OF REFACTOR ---
