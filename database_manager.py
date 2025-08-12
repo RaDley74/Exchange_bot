@@ -344,12 +344,31 @@ class DatabaseManager:
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def get_referrals_by_referrer_id(self, referrer_id: int):
-        """Gets all referrals for a given user."""
-        query = "SELECT * FROM referrals WHERE referrer_id = ?"
+    def get_referrals_by_referrer_id(self, referrer_id: int, page: int = 1, page_size: int = 10) -> tuple[list, int]:
+        """
+        Gets a paginated list of referrals for a given user.
+        Returns a tuple: (list of referrals on the current page, total number of pages).
+        """
         cursor = self._conn.cursor()
-        cursor.execute(query, (referrer_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        offset = (page - 1) * page_size
+
+        # Query to get a slice of referrals
+        list_query = "SELECT * FROM referrals WHERE referrer_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        cursor.execute(list_query, (referrer_id, page_size, offset))
+        referrals_on_page = [dict(row) for row in cursor.fetchall()]
+
+        # Query to get the total count for page calculation
+        count_query = "SELECT COUNT(*) FROM referrals WHERE referrer_id = ?"
+        cursor.execute(count_query, (referrer_id,))
+        total_count = cursor.fetchone()[0]
+
+        if total_count == 0:
+            total_pages = 1
+        else:
+            # Calculate the total number of pages, rounding up
+            total_pages = (total_count + page_size - 1) // page_size
+
+        return referrals_on_page, total_pages
 
     def update_referral_balance(self, user_id: int, amount_to_add: float):
         """Updates a user's referral balance."""
