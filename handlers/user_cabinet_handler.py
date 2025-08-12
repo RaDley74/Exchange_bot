@@ -26,7 +26,6 @@ class UserCabinetHandler:
     def __init__(self, bot_instance):
         self.bot = bot_instance
 
-    # --- START OF CHANGE ---
     def _format_profile_info(self, profile_data: dict, user_id, username) -> str:
         """Formats user profile data for display in a message."""
 
@@ -49,7 +48,6 @@ class UserCabinetHandler:
             f"<b>🆔 ІПН/ЄДРПОУ:</b> <code>{profile_data.get('inn') or 'Не указан'}</code>"
         )
         return header + body
-    # --- END OF CHANGE ---
 
     async def start_cabinet(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """
@@ -60,9 +58,7 @@ class UserCabinetHandler:
         logger.info(f"[Uid] ({user.id}, {user.username}) - Entered user cabinet.")
 
         profile_data = self.bot.db.get_user_profile(user.id)
-        # --- START OF CHANGE ---
         text = self._format_profile_info(profile_data, user.id, user.username)
-        # --- END OF CHANGE ---
 
         keyboard = [
             [InlineKeyboardButton("📝 Изменить мои реквизиты", callback_data='edit_profile')],
@@ -135,13 +131,22 @@ class UserCabinetHandler:
         return await self.start_cabinet(update, context)
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Cancels the current conversation and returns to the main menu."""
+        """
+        Cancels the current conversation and returns ConversationHandler.END.
+        The global /start handler will then show the main menu.
+        """
         user = update.effective_user
         logger.info(f"[Uid] ({user.id}) - Canceled cabinet operation.")
-        await update.message.reply_text('Действие отменено.')
+        # Delete the message that triggered the fallback, for cleanliness
+        if update.message:
+            try:
+                await update.message.delete()
+            except Exception as e:
+                logger.warning(f"Failed to delete message during cabinet cancellation: {e}")
+
         if 'profile' in context.user_data:
             del context.user_data['profile']
-        await self.bot.exchange_handler.main_menu(update, context)
+        # DO NOT call self.bot.exchange_handler.main_menu(update, context) here
         return ConversationHandler.END
 
     def setup_handlers(self, application):
@@ -163,7 +168,7 @@ class UserCabinetHandler:
                 self.EDIT_INN: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.edit_inn_and_save)],
             },
             fallbacks=[
-                CommandHandler('start', self.cancel),
+                CommandHandler('start', self.cancel), # This now just ends the conversation
                 CallbackQueryHandler(self.handle_cabinet_menu, pattern='^back_to_main_menu$')
             ],
             per_message=False

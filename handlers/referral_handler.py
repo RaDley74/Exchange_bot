@@ -139,11 +139,8 @@ class ReferralHandler:
                 ]
             },
             fallbacks=[
-                # --- START OF FIX ---
                 CommandHandler('start', self.bot.exchange_handler.cancel_and_return_to_menu)
-                # --- END OF FIX ---
             ],
-            per_message=False,
-            block=False  # Allow other handlers to process updates
+            per_message=False
         )
         application.add_handler(referral_conv_handler)
