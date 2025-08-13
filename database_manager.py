@@ -207,6 +207,25 @@ class DatabaseManager:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    # --- START OF CHANGE ---
+    def get_profile_by_id_or_login(self, user_id_or_login: str):
+        """
+        Retrieves a user profile by their numeric ID or username string.
+        """
+        cursor = self._conn.cursor()
+        if user_id_or_login.isdigit():
+            query = "SELECT * FROM user_profiles WHERE user_id = ?"
+            params = (int(user_id_or_login),)
+        else:
+            query = "SELECT * FROM user_profiles WHERE username = ?"
+            # Remove "@" from username if present
+            params = (user_id_or_login.lstrip('@'),)
+
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    # --- END OF CHANGE ---
+
     def create_or_update_user_profile(self, user_id, profile_data: dict):
         """
         Creates a new user profile or updates an existing one with new data.
