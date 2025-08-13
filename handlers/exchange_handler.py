@@ -1101,11 +1101,12 @@ class ExchangeHandler:
                            f"🆔 ID: `{request_data['user_id']}`\n"
                            f"📛 Юзернейм: @{username_display}\n\n")
 
-        transfer_details_block = (f"🏦 Банк: `{sanitize(request_data.get('bank_name'))}`\n"
-                                  f"📝 ФИО: `{sanitize(request_data.get('fio'))}`\n"
-                                  f"💳 IBAN: `{sanitize(request_data.get('card_info'))}`\n"
-                                  f"🔢 Номер карты: `{sanitize(request_data.get('card_number'))}`\n"
-                                  f"📇 ИНН: `{sanitize(request_data.get('inn'))}`\n\n")
+        transfer_details_block = (f"```Реквизиты:\n"
+                                  f"🏦 Банк: {sanitize(request_data.get('bank_name'))}\n"
+                                  f"📝 ФИО: {sanitize(request_data.get('fio'))}\n"
+                                  f"💳 Номер карты: {sanitize(request_data.get('card_info'))}\n"
+                                  f"🔢 IBAN: {sanitize(request_data.get('card_number'))}\n"
+                                  f"📇 ИНН: {sanitize(request_data.get('inn'))}```\n\n")
 
         referral_payout = request_data.get('referral_payout_amount', 0.0)
         payout_info = f"💱 {request_data['amount_currency']} {request_data['currency']} → {request_data['amount_uah']:.2f} UAH\n\n"
