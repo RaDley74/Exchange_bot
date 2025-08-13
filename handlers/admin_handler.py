@@ -41,7 +41,7 @@ class AdminPanelHandler:
         'completed'
     ]
     # Terminal statuses from which the state cannot be changed
-    TERMINAL_STATUSES = ['completed']
+    TERMINAL_STATUSES = ['completed', 'declined']
 
     def __init__(self, bot_instance):
         """
@@ -232,6 +232,12 @@ class AdminPanelHandler:
         new_status = data.replace('set_status_', '')
         logger.info(
             f"[Aid] ({admin_user.id}, {admin_user.username}) - Changing status of request #{request_id} to '{new_status}'.")
+            
+        # --- START OF CHANGE ---
+        # If the admin manually declines the request, trigger the refund logic.
+        if new_status == 'declined':
+            await self.bot.exchange_handler.refund_referral_debit_for_request(request_id)
+        # --- END OF CHANGE ---
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -369,29 +375,25 @@ class AdminPanelHandler:
     def _format_application_info(self, app) -> str:
         referral_payout = app.get('referral_payout_amount', 0.0)
         payout_info = ""
-        # Рассчитываем сумму в UAH без учета реферальных
-        original_amount_uah = app['amount_uah']
+        
+        payout_info = f"<b>Сумма (UAH):</b> {app['amount_uah']:.2f}\n"
         if referral_payout > 0:
-            # Если есть реферальная выплата, amount_uah в базе уже включает ее.
-            # Для корректного отображения нам нужно ее вычесть.
-            # Однако, для избежания путаницы, предположим, что amount_uah не меняется, а payout_info добавляется
-            total_uah = app['amount_uah']  # total_uah уже содержит реферальные
-            original_amount_uah_calc = total_uah - (referral_payout * app['exchange_rate'])
-
             payout_info = (
-                f"<b>Сумма (UAH) без реф:</b> {original_amount_uah_calc:.2f}\n"
-                f"<b>Вывод с реф. баланса ($):</b> {referral_payout:.2f}\n"
-                f"<b>ИТОГО к выплате (UAH):</b> {total_uah:.2f}\n"
+                f"<b>Сумма обмена (валюта):</b> {app['amount_currency']}\n"
+                f"<b>Списано с реф. баланса ($):</b> {referral_payout:.2f}\n"
+                f"<b>ИТОГО к выплате (UAH):</b> {app['amount_uah']:.2f}\n"
             )
         else:
-            payout_info = f"<b>Сумма (UAH):</b> {app['amount_uah']:.2f}\n"
+             payout_info = (
+                f"<b>Сумма (валюта):</b> {app['amount_currency']}\n"
+                f"<b>Сумма (UAH):</b> {app['amount_uah']:.2f}\n"
+            )
 
         return (
             f"<b>Заявка ID:</b> <code>{app['id']}</code>\n"
             f"<b>Пользователь:</b> @{app['username']} (<code>{app['user_id']}</code>)\n"
             f"<b>Статус:</b> {self.bot.exchange_handler.translate_status(app['status'])}\n"
             f"<b>Валюта:</b> {app['currency']}\n"
-            f"<b>Сумма (валюта):</b> {app['amount_currency']}\n"
             f"{payout_info}"
             f"<b>Банк:</b> {app['bank_name']}\n"
             f"<b>IBAN:</b> <code>{app['card_info']}</code>\n"

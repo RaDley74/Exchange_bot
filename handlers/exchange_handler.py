@@ -891,6 +891,10 @@ class ExchangeHandler:
             await query.edit_message_text(f"❌ Заявка #{request_id} больше не найдена.")
             return ConversationHandler.END
 
+        # --- START OF CHANGE ---
+        await self.refund_referral_debit_for_request(request_id)
+        # --- END OF CHANGE ---
+
         if request_data['user_message_id']:
             try:
                 await context.bot.delete_message(chat_id=request_data['user_id'], message_id=request_data['user_message_id'])
@@ -930,6 +934,10 @@ class ExchangeHandler:
 
         logger.info(
             f"[Aid] ({admin_user.id}) - Cancelling request #{request_id} with reason: {reason}")
+
+        # --- START OF CHANGE ---
+        await self.refund_referral_debit_for_request(request_id)
+        # --- END OF CHANGE ---
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -1020,6 +1028,38 @@ class ExchangeHandler:
             reply_markup=None, parse_mode='Markdown'
         )
 
+    # --- START OF CHANGE ---
+    async def refund_referral_debit_for_request(self, request_id: int):
+        """
+        Checks if a cancelled request used referral funds and refunds them.
+        Sends a notification to the user about the refund.
+        """
+        logger.info(
+            f"[System] - Checking for referral refund for cancelled request #{request_id}.")
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            logger.warning(f"[System] - Refund check failed: Request #{request_id} not found.")
+            return
+
+        amount_to_refund = request_data.get('referral_payout_amount', 0.0)
+
+        if amount_to_refund > 0:
+            user_id = request_data['user_id']
+            # The database operation itself is synchronous, but we call it from an async method.
+            self.bot.db.update_referral_balance(user_id, amount_to_refund)
+            logger.info(
+                f"[System] - Refunded ${amount_to_refund:.2f} to user {user_id} for cancelled request #{request_id}.")
+
+            try:
+                await self.bot.application.bot.send_message(
+                    chat_id=user_id,
+                    text=f"💰 Средства в размере ${amount_to_refund:.2f} с вашего реферального баланса, которые были использованы в отмененной заявке #{request_id}, возвращены на ваш счет."
+                )
+            except Exception as e:
+                logger.error(
+                    f"[System] - Failed to send refund notification to user {user_id} for request #{request_id}: {e}")
+    # --- END OF CHANGE ---
+
     async def cancel_request_by_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
@@ -1032,8 +1072,14 @@ class ExchangeHandler:
             await query.edit_message_text("❌ Эту заявку уже нельзя отменить.", reply_markup=None)
             return
 
+        # --- START OF CHANGE ---
+        # Refund referral balance BEFORE changing the status
+        await self.refund_referral_debit_for_request(request_id)
+        # --- END OF CHANGE ---
+
         self.bot.db.update_request_status(request_id, 'declined')
         await query.edit_message_text(f"✅ Ваша заявка #{request_id} была успешно отменена.", reply_markup=None)
+
         admin_text, _ = self._prepare_admin_notification(self.bot.db.get_request_by_id(request_id))
         admin_text += f"\n\n❌🚫 ЗАЯВКА ОТМЕНЕНА ПОЛЬЗОВАТЕЛЕМ (@{user.username or user.id})"
         await self._update_admin_messages(request_id, admin_text, None)
@@ -1064,11 +1110,23 @@ class ExchangeHandler:
         referral_payout = request_data.get('referral_payout_amount', 0.0)
         payout_info = f"💱 {request_data['amount_currency']} {request_data['currency']} → {request_data['amount_uah']:.2f} UAH\n\n"
         if referral_payout > 0:
+            # This logic might need adjustment if amount_uah already includes the payout. Assuming it does.
+            # Let's calculate the original amount for display purposes.
+            # This assumes exchange_rate is stored, which it is.
             original_amount_uah = request_data['amount_uah'] - \
                 (referral_payout * request_data['exchange_rate'])
+
+            # This part seems complex. Let's simplify the display logic for the admin.
+            # The DB stores the final amount_uah and amount_currency. The referral_payout_amount is separate.
+
+            # Let's re-read create_exchange_request... amount_uah is the final amount.
+            # total_referral_debit is saved as referral_payout_amount.
+            # This means the payout info in admin panel might be slightly confusing.
+            # Let's make it clearer.
+
             payout_info = (
-                f"💱 {request_data['amount_currency']} {request_data['currency']} → {original_amount_uah:.2f} UAH\n"
-                f"🏆 + Реф. выплата: ${referral_payout:.2f}\n"
+                f"💱 Обмен: {request_data['amount_currency']} {request_data['currency']}\n"
+                f"🏆 Списано с реф. баланса: ${referral_payout:.2f}\n"
                 f"💸 **Итого к выплате: {request_data['amount_uah']:.2f} UAH**\n\n"
             )
 
