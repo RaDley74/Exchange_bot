@@ -402,8 +402,10 @@ class ExchangeHandler:
             trx_cost_usd = self.bot.config.trx_cost_usdt
             referral_balance = ud.get('referral_balance', 0.0)
 
-            # Проверяем, был ли использован реферальный баланс и достаточен ли он для оплаты TRX
-            if ud.get('total_referral_debit', 0.0) > 0 and referral_balance >= trx_cost_usd:
+            # --- START OF CHANGE ---
+            # Offer to pay from referral balance if it's sufficient,
+            # regardless of whether it was added to the main payout.
+            if referral_balance >= trx_cost_usd:
                 keyboard = [
                     [InlineKeyboardButton(f"✅ Да, оплатить с баланса",
                                           callback_data='trx_from_ref_yes')],
@@ -416,8 +418,8 @@ class ExchangeHandler:
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 return self.ASK_PAY_TRX_FROM_REFERRAL
-
-            else:  # Стандартный флоу TRX, если нет реф. баланса или его не хватает
+            # --- END OF CHANGE ---
+            else:  # Standard TRX flow if there's no referral balance or it's insufficient.
                 keyboard = [
                     [InlineKeyboardButton("✅ Согласен", callback_data='send_transfer_trx')],
                     [InlineKeyboardButton("❌ Не согласен", callback_data='back_to_menu')]
@@ -438,19 +440,16 @@ class ExchangeHandler:
         query = update.callback_query
         await query.answer()
         ud = context.user_data
-        trx_cost_usd = self.bot.config.trx_cost_usdt
 
+        # --- START OF CHANGE ---
+        # This function now only records the user's choice.
+        # All calculations are moved to the final confirmation step.
         if query.data == 'trx_from_ref_yes':
             ud['trx_paid_by_referral'] = True
-            # Общая сумма списания с реф. баланса не меняется, но пересчитываем выплату
-            payout_from_referral_usd = ud['total_referral_debit'] - trx_cost_usd
-            ud['sum_uah'] = ud['original_sum_uah'] + \
-                (payout_from_referral_usd * ud['exchange_rate'])
             logger.info(
                 f"[Uid] ({update.effective_user.id}) - User chose to pay TRX fee from referral balance.")
         else:  # trx_from_ref_no
             ud['trx_paid_by_referral'] = False
-            # Сумма выплаты не меняется, но TRX вычитается из основной суммы
             logger.info(
                 f"[Uid] ({update.effective_user.id}) - User chose to pay TRX fee from exchange amount.")
 
@@ -458,6 +457,7 @@ class ExchangeHandler:
             "✅ Ваш выбор учтен.\n\n📬 Пожалуйста, укажите ваш TRX-кошелек:",
             parse_mode='Markdown'
         )
+        # --- END OF CHANGE ---
         return self.ENTERING_TRX_ADDRESS
 
     # ... keep all other methods like _process_standard_exchange, resend_messages_for_request etc. the same
@@ -584,33 +584,67 @@ class ExchangeHandler:
         context.user_data['trx_address'] = trx_address
         ud = context.user_data
         trx_cost_usd = self.bot.config.trx_cost_usdt
+        rate = ud['exchange_rate']
+        info_text_lines = []
 
-        # Пересчитываем финальные суммы для подтверждения
-        amount_to_send_usdt = ud['amount']
-        final_sum_uah = ud['sum_uah']
-        info_text = ""
+        # --- START OF CHANGE: Centralized Calculation Logic ---
+
+        # The amount of referral balance user chose to add to the main payout
+        payout_from_ref_usd = ud.get('total_referral_debit', 0.0)
+
+        # Final amount of USDT user will need to send
+        final_amount_to_send_usdt = ud.get('amount')
+        # Final amount of UAH user will receive
+        final_sum_uah = ud['original_sum_uah']
+        # Final amount to debit from user's referral balance
+        final_total_referral_debit = 0.0
 
         if ud.get('trx_paid_by_referral'):
-            info_text = (
-                f"💰 Обмен: {ud['amount']} {ud['currency']} → {ud['original_sum_uah']:.2f} UAH\n"
-                f"🏆 Реф. бонус (за вычетом TRX): +{final_sum_uah - ud['original_sum_uah']:.2f} UAH\n"
-                f"⚡ Комиссия TRX (${trx_cost_usd}) **оплачена с реферального баланса**.\n"
-            )
-        else:  # Стандартный вычет TRX
-            amount_to_send_usdt -= trx_cost_usd
-            final_sum_uah = (amount_to_send_usdt *
-                             ud['exchange_rate']) + (ud['sum_uah'] - ud['original_sum_uah'])
-            ud['amount'] = amount_to_send_usdt  # Обновляем сумму в валюте для отправки
-            ud['sum_uah'] = final_sum_uah  # Обновляем итоговую сумму в UAH
-            info_text = (
-                f"💰 Обмен: {ud['amount']} {ud['currency']}\n"
-                f"⚡ Вычет за TRX: -${trx_cost_usd}\n"
-            )
-            if ud.get('total_referral_debit', 0.0) > 0:
-                referral_payout_uah = ud['sum_uah'] - (amount_to_send_usdt * ud['exchange_rate'])
-                info_text += f"🏆 Реф. бонус: +{referral_payout_uah:.2f} UAH\n"
+            # --- CASE 1: TRX is paid from referral balance ---
+            final_total_referral_debit = payout_from_ref_usd
 
-        # --- START OF CHANGE ---
+            if payout_from_ref_usd > 0:
+                # User is adding payout AND paying TRX from it.
+                # Total debit from ref balance is the whole payout amount.
+                payout_after_trx_usd = payout_from_ref_usd - trx_cost_usd
+                final_sum_uah += payout_after_trx_usd * rate
+                info_text_lines.append(
+                    f"💰 Обмен: {final_amount_to_send_usdt:.2f} {ud['currency']} → {ud['original_sum_uah']:.2f} UAH")
+                info_text_lines.append(
+                    f"🏆 Реф. бонус (за вычетом TRX): +{payout_after_trx_usd * rate:.2f} UAH")
+            else:
+                # User is NOT adding payout, but IS paying TRX from balance.
+                # Total debit is just the TRX cost.
+                final_total_referral_debit = trx_cost_usd
+                info_text_lines.append(
+                    f"💰 Обмен: {final_amount_to_send_usdt:.2f} {ud['currency']} → {final_sum_uah:.2f} UAH")
+
+            info_text_lines.append(
+                f"⚡ Комиссия TRX (${trx_cost_usd}) **оплачена с реферального баланса**.")
+
+        else:
+            # --- CASE 2: TRX is paid from the exchange amount ---
+            final_amount_to_send_usdt -= trx_cost_usd
+            final_sum_uah = final_amount_to_send_usdt * rate
+
+            if payout_from_ref_usd > 0:
+                # User is adding payout.
+                final_sum_uah += payout_from_ref_usd * rate
+                info_text_lines.append(f"🏆 Реф. бонус: +{payout_from_ref_usd * rate:.2f} UAH")
+
+            final_total_referral_debit = payout_from_ref_usd
+            info_text_lines.insert(
+                0, f"💰 Обмен (сумма к отправке): {final_amount_to_send_usdt:.2f} {ud['currency']}")
+            info_text_lines.append(f"⚡ Вычет за TRX из суммы обмена: -${trx_cost_usd}")
+
+        # Update user_data with the final calculated values for DB insertion
+        ud['amount'] = final_amount_to_send_usdt
+        ud['sum_uah'] = final_sum_uah
+        ud['total_referral_debit'] = final_total_referral_debit
+
+        info_text = "\n".join(info_text_lines)
+        # --- END OF CHANGE ---
+
         details_text = (
             f"\n\n**Ваши реквизиты для получения выплаты:**\n"
             f"🏦 Банк: `{ud.get('bank_name', 'Не указан')}`\n"
@@ -619,7 +653,6 @@ class ExchangeHandler:
             f"🔢 Номер карты: `{ud.get('card_number', 'Не указан')}`\n"
             f"🆔 ІПН/ЄДРПОУ: `{ud.get('inn', 'Не указан')}`"
         )
-        # --- END OF CHANGE ---
 
         keyboard = [
             [InlineKeyboardButton("✅ Отправить", callback_data='send_exchange_with_trx')],
@@ -628,7 +661,7 @@ class ExchangeHandler:
 
         await update.message.reply_text(
             f"📋 **Проверьте информацию:**\n\n"
-            f"{info_text}"
+            f"{info_text}\n"
             f"💸 **Итого к получению: {final_sum_uah:.2f} UAH**"
             f"{details_text}\n\n"
             f"🔗 Ваш TRX-адрес для получения комиссии: `{trx_address}`\n\n"
