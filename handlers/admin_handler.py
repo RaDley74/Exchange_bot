@@ -15,7 +15,6 @@ class AdminPanelHandler:
     """
     Handles all logic related to the admin panel.
     """
-    # Conversation states
     (
         ASK_PASSWORD,
         ADMIN_MENU,
@@ -28,15 +27,12 @@ class AdminPanelHandler:
         AWAIT_REQUEST_ID_FOR_RESTORE,
         AWAIT_REQUEST_ID_FOR_STATUS_CHANGE,
         SELECT_NEW_STATUS,
-        # --- START OF CHANGE ---
         REFERRAL_MENU,
         AWAIT_USER_FOR_REF_ACTION,
         AWAIT_AMOUNT_FOR_REF_ACTION,
         AWAIT_USER_FOR_REF_CHECK
-        # --- END OF CHANGE ---
     ) = range(15)
 
-    # Ordered list of statuses defining the main workflow
     WORKFLOW_STATUSES = [
         'new',
         'awaiting trx transfer',
@@ -46,7 +42,6 @@ class AdminPanelHandler:
         'funds sent',
         'completed'
     ]
-    # Terminal statuses from which the state cannot be changed
     TERMINAL_STATUSES = ['completed', 'declined']
 
     def __init__(self, bot_instance):
@@ -86,8 +81,7 @@ class AdminPanelHandler:
     async def _show_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         logger.info(f"[Aid] ({user.id}, {user.username}) - Displaying the admin panel main menu.")
-        
-        # Clear any previous conversation data
+
         context.user_data.clear()
 
         is_enabled = self.bot.config.bot_enabled
@@ -105,7 +99,7 @@ class AdminPanelHandler:
             ],
             [
                 InlineKeyboardButton("🔧 Изменить статус", callback_data='change_status'),
-                InlineKeyboardButton("🏆 Рефералка", callback_data='admin_referral_menu') # --- NEW BUTTON ---
+                InlineKeyboardButton("🏆 Рефералка", callback_data='admin_referral_menu')
             ],
             [toggle_button],
         ]
@@ -145,10 +139,8 @@ class AdminPanelHandler:
             return await self._show_info(query)
         elif data == 'admin_settings':
             return await self._show_settings_menu(query)
-        # --- START OF CHANGE ---
         elif data == 'admin_referral_menu':
             return await self._show_referral_menu(query)
-        # --- END OF CHANGE ---
         elif data == 'admin_back_menu':
             return await self._show_main_menu(update, context)
         elif data == 'admin_set_password':
@@ -176,9 +168,8 @@ class AdminPanelHandler:
             return await self.toggle_bot_status(update, context)
 
         return self.ADMIN_MENU
-        
-    # --- START: NEW REFERRAL MANAGEMENT METHODS ---
-    async def _show_referral_menu(self, query: Update.callback_query): # type: ignore
+
+    async def _show_referral_menu(self, query: Update.callback_query):
         """Displays the referral balance management menu."""
         keyboard = [
             [InlineKeyboardButton("➕ Добавить", callback_data='ref_add_balance')],
@@ -193,10 +184,10 @@ class AdminPanelHandler:
         """Asks for a user ID/login to perform a balance action on."""
         query = update.callback_query
         await query.answer()
-        
+
         action = query.data
-        context.user_data['ref_action'] = action # 'ref_add_balance' or 'ref_subtract_balance'
-        
+        context.user_data['ref_action'] = action
+
         action_text = "добавить средства" if action == 'ref_add_balance' else "списать средства"
 
         await query.edit_message_text(f"Введите ID или юзернейм пользователя, которому вы хотите {action_text}:")
@@ -207,7 +198,6 @@ class AdminPanelHandler:
         user_input = update.message.text.strip()
         admin_user = update.effective_user
 
-        # Find the target user's profile
         target_profile = self.bot.db.get_profile_by_id_or_login(user_input)
 
         if not target_profile:
@@ -247,22 +237,19 @@ class AdminPanelHandler:
         target_user_id = context.user_data['target_user_id']
         target_username = context.user_data['target_username']
         action = context.user_data['ref_action']
-        
-        # Make amount negative for subtraction
+
         if action == 'ref_subtract_balance':
             amount *= -1
-            
-        # Update balance in DB
+
         self.bot.db.update_referral_balance(target_user_id, amount)
-        
-        # Get new balance for confirmation message
+
         new_profile = self.bot.db.get_user_profile(target_user_id)
         new_balance = new_profile.get('referral_balance', 0.0)
-        
+
         action_text = "Добавлено" if amount > 0 else "Списано"
-        
-        # Notify admin
-        logger.info(f"[Aid] ({admin_user.id}) manually changed ref balance for user {target_user_id} by {amount}. New balance: {new_balance}")
+
+        logger.info(
+            f"[Aid] ({admin_user.id}) manually changed ref balance for user {target_user_id} by {amount}. New balance: {new_balance}")
         await update.message.reply_text(
             f"✅ Успешно!\n\n"
             f"👤 Пользователь: @{target_username}\n"
@@ -270,7 +257,6 @@ class AdminPanelHandler:
             f"💰 Новый баланс: ${new_balance:.2f}"
         )
 
-        # Notify user
         try:
             await self.bot.application.bot.send_message(
                 chat_id=target_user_id,
@@ -283,7 +269,8 @@ class AdminPanelHandler:
                 parse_mode='Markdown'
             )
         except Exception as e:
-            logger.error(f"Failed to send balance change notification to user {target_user_id}: {e}")
+            logger.error(
+                f"Failed to send balance change notification to user {target_user_id}: {e}")
             await update.message.reply_text(f"⚠️ Не удалось отправить уведомление пользователю @{target_username}.")
 
         return await self._show_main_menu(update, context)
@@ -298,13 +285,13 @@ class AdminPanelHandler:
     async def _check_user_balance(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Finds the user and shows their balance to the admin."""
         user_input = update.message.text.strip()
-        
+
         target_profile = self.bot.db.get_profile_by_id_or_login(user_input)
-        
+
         if not target_profile:
             await update.message.reply_text("❌ Пользователь не найден. Попробуйте снова или вернитесь в меню /a.")
             return self.AWAIT_USER_FOR_REF_CHECK
-            
+
         target_user_id = target_profile['user_id']
         target_username = target_profile.get('username', 'N/A')
         current_balance = target_profile.get('referral_balance', 0.0)
@@ -315,8 +302,6 @@ class AdminPanelHandler:
             parse_mode='Markdown'
         )
         return await self._show_main_menu(update, context)
-
-    # --- END: NEW REFERRAL MANAGEMENT METHODS ---
 
     async def show_status_selection_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         admin_user = update.effective_user
@@ -388,12 +373,9 @@ class AdminPanelHandler:
         new_status = data.replace('set_status_', '')
         logger.info(
             f"[Aid] ({admin_user.id}, {admin_user.username}) - Changing status of request #{request_id} to '{new_status}'.")
-            
-        # --- START OF CHANGE ---
-        # If the admin manually declines the request, trigger the refund logic.
+
         if new_status == 'declined':
             await self.bot.exchange_handler.refund_referral_debit_for_request(request_id)
-        # --- END OF CHANGE ---
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -531,7 +513,7 @@ class AdminPanelHandler:
     def _format_application_info(self, app) -> str:
         referral_payout = app.get('referral_payout_amount', 0.0)
         payout_info = ""
-        
+
         payout_info = f"<b>Сумма (UAH):</b> {app['amount_uah']:.2f}\n"
         if referral_payout > 0:
             payout_info = (
@@ -540,7 +522,7 @@ class AdminPanelHandler:
                 f"<b>ИТОГО к выплате (UAH):</b> {app['amount_uah']:.2f}\n"
             )
         else:
-             payout_info = (
+            payout_info = (
                 f"<b>Сумма (валюта):</b> {app['amount_currency']}\n"
                 f"<b>Сумма (UAH):</b> {app['amount_uah']:.2f}\n"
             )
@@ -643,17 +625,17 @@ class AdminPanelHandler:
                 self.AWAIT_REQUEST_ID_FOR_RESTORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.restore_application)],
                 self.AWAIT_REQUEST_ID_FOR_STATUS_CHANGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.show_status_selection_menu)],
                 self.SELECT_NEW_STATUS: [CallbackQueryHandler(self.process_status_change, pattern='^set_status_|admin_back_menu$')],
-                
-                # --- START OF CHANGE: Add new states for referral management ---
+
                 self.REFERRAL_MENU: [
-                    CallbackQueryHandler(self._ask_for_user_to_modify, pattern='^ref_(add|subtract)_balance$'),
-                    CallbackQueryHandler(self._ask_for_user_to_check, pattern='^ref_check_balance$'),
+                    CallbackQueryHandler(self._ask_for_user_to_modify,
+                                         pattern='^ref_(add|subtract)_balance$'),
+                    CallbackQueryHandler(self._ask_for_user_to_check,
+                                         pattern='^ref_check_balance$'),
                     CallbackQueryHandler(self._show_main_menu, pattern='^admin_back_menu$')
                 ],
                 self.AWAIT_USER_FOR_REF_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self._ask_for_amount)],
                 self.AWAIT_AMOUNT_FOR_REF_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self._process_balance_change)],
                 self.AWAIT_USER_FOR_REF_CHECK: [MessageHandler(filters.TEXT & ~filters.COMMAND, self._check_user_balance)],
-                # --- END OF CHANGE ---
             },
             fallbacks=[CommandHandler('a', self.start), CommandHandler('ac', self.close)]
         )

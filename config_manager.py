@@ -1,5 +1,3 @@
-# config_manager.py
-
 import configparser
 import logging
 import asyncio
@@ -17,7 +15,6 @@ class ConfigManager:
     def __init__(self, file_path='settings.ini'):
         self.file_path = file_path
         self._config = configparser.ConfigParser()
-        # Private _loop variable for asynchronous saving
         self._loop = None
 
     def load(self):
@@ -27,23 +24,23 @@ class ConfigManager:
         """
         if not os.path.exists(self.file_path):
             logger.warning(
-                f"[System] - Configuration file '{self.file_path}' not found. Creating a new file.")
+                f"[System] - Файл конфигурации '{self.file_path}' не найден. Создание нового файла.")
             self._create_default_config()
             try:
                 with open(self.file_path, 'w', encoding='utf-8') as config_file:
                     self._config.write(config_file)
                 logger.info(
-                    f"[System] - Configuration file '{self.file_path}' has been created. Please edit it and restart the bot.")
+                    f"[System] - Файл конфигурации '{self.file_path}' был создан. Пожалуйста, отредактируйте его и перезапустите бота.")
                 print(
-                    f"Configuration file '{self.file_path}' has been created. Specify the token and ID, then restart the script.")
-                input("Press Enter to exit...")
+                    f"Файл конфигурации '{self.file_path}' был создан. Укажите токен и ID, затем перезапустите скрипт.")
+                input("Нажмите Enter для выхода...")
                 exit(0)
             except IOError as e:
-                logger.error(f"[System] - Failed to create configuration file: {e}")
+                logger.error(f"[System] - Не удалось создать файл конфигурации: {e}")
                 exit(1)
         else:
             self._config.read(self.file_path, encoding='utf-8')
-            logger.info(f"[System] - Configuration file '{self.file_path}' loaded successfully.")
+            logger.info(f"[System] - Файл конфигурации '{self.file_path}' успешно загружен.")
 
     def _create_default_config(self):
         """Creates the default configuration structure."""
@@ -65,9 +62,9 @@ class ConfigManager:
         try:
             with open(self.file_path, 'w', encoding='utf-8') as config_file:
                 self._config.write(config_file)
-            logger.info("[System] - Configuration saved successfully.")
+            logger.info("[System] - Конфигурация успешно сохранена.")
         except IOError as e:
-            logger.error(f"[System] - Error saving configuration: {e}")
+            logger.error(f"[System] - Ошибка при сохранении конфигурации: {e}")
 
     async def save(self):
         """
@@ -87,9 +84,6 @@ class ConfigManager:
             self._config.add_section(section)
         self._config.set(section, option, str(value))
 
-    # --- Properties for convenient access to settings ---
-    # This allows writing bot.config.token instead of bot.config.get('User', 'TOKEN')
-
     @property
     def token(self) -> str:
         return self.get('User', 'TOKEN')
@@ -103,7 +97,7 @@ class ConfigManager:
             return [int(admin_id.strip()) for admin_id in admin_ids_str.split(',')]
         except ValueError:
             logger.error(
-                "[System] - Error in ADMIN_CHAT_ID format. Make sure it is a comma-separated list of numbers.")
+                "[System] - Ошибка в формате ADMIN_CHAT_ID. Убедитесь, что это список чисел, разделенных запятыми.")
             return []
 
     @property

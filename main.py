@@ -1,5 +1,3 @@
-# main.py
-
 import os
 import sys
 import logging
@@ -7,17 +5,12 @@ import warnings
 
 from telegram.ext import ApplicationBuilder
 
-# Import our classes
 from config_manager import ConfigManager
 from database_manager import DatabaseManager
 from handlers.admin_handler import AdminPanelHandler
 from handlers.exchange_handler import ExchangeHandler
 from handlers.user_cabinet_handler import UserCabinetHandler
-# --- START OF CHANGE ---
 from handlers.referral_handler import ReferralHandler
-# --- END OF CHANGE ---
-
-# --- Logging Setup ---
 
 os.makedirs("log", exist_ok=True)
 os.makedirs("database", exist_ok=True)
@@ -53,14 +46,10 @@ class Bot:
 
         self.application = ApplicationBuilder().token(self.config.token).build()
 
-        # --- START OF CHANGE ---
-        # Create instances of our handlers, passing them `self` (the Bot instance)
-        # to provide access to config, db, and other handlers if needed.
         self.admin_handler = AdminPanelHandler(self)
         self.exchange_handler = ExchangeHandler(self)
         self.user_cabinet_handler = UserCabinetHandler(self)
-        self.referral_handler = ReferralHandler(self)  # Add this line
-        # --- END OF CHANGE ---
+        self.referral_handler = ReferralHandler(self)
 
     def setup_handlers(self):
         """
@@ -69,9 +58,7 @@ class Bot:
         self.admin_handler.setup_handlers(self.application)
         self.exchange_handler.setup_handlers(self.application)
         self.user_cabinet_handler.setup_handlers(self.application)
-        # --- START OF CHANGE ---
-        self.referral_handler.setup_handlers(self.application)  # Add this line
-        # --- END OF CHANGE ---
+        self.referral_handler.setup_handlers(self.application)
         logger.info("[System] - Handlers have been successfully set up.")
 
     def run(self):

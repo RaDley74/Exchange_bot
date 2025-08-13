@@ -50,14 +50,10 @@ class ExchangeHandler:
 
         query = update.callback_query
         if query:
-            # Answer the callback query to remove the "loading" state on the button
             await query.answer()
-            # Edit the message to show the main menu
-            # Check if the message still exists before editing
             if query.message:
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         elif update.message:
-            # If called from a command like /start, send a new message
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE, called_from_referral: bool = False):
@@ -101,7 +97,6 @@ class ExchangeHandler:
         logger.info(
             f"[Uid] ({user.id}, {user.username}) - Canceled or finished a conversation. Returning ConversationHandler.END to let global /start handler take over.")
 
-        # We explicitly delete the message if it was a command, for cleanliness
         if update.message:
             try:
                 await update.message.delete()
@@ -109,12 +104,7 @@ class ExchangeHandler:
                 logger.warning(
                     f"Could not delete message {update.message.message_id} from chat {update.effective_chat.id}: {e}")
 
-        # DO NOT call self.main_menu here.
-        # Returning ConversationHandler.END will make the update fall through to lower groups.
-        # The global /start handler (in group=1) will then pick it up and display the main menu.
         return ConversationHandler.END
-
-    # --- START OF REFACTOR ---
 
     async def start_exchange_convo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
@@ -150,7 +140,6 @@ class ExchangeHandler:
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-    # ... (the rest of your exchange handler methods like choosing_currency, entering_amount, etc., remain unchanged) ...
     async def choosing_currency(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
@@ -169,7 +158,6 @@ class ExchangeHandler:
             return ConversationHandler.END
         return ConversationHandler.END
 
-    # --- START OF MAJOR CHANGE ---
     async def entering_amount(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = update.message.text
         user = update.effective_user
@@ -220,7 +208,7 @@ class ExchangeHandler:
             referral_payout_uah = referral_balance_usd * rate
 
             ud['total_referral_debit'] = referral_balance_usd
-            ud['sum_uah'] += referral_payout_uah  # Добавляем к основной сумме
+            ud['sum_uah'] += referral_payout_uah
 
             logger.info(
                 f"[Uid] ({update.effective_user.id}) - User chose to use referral balance of ${referral_balance_usd:.2f}.")
@@ -281,7 +269,6 @@ class ExchangeHandler:
             logger.info(f"[Uid] ({user.id}) - Chose to enter new requisites.")
             await query.edit_message_text("🏦 Пожалуйста, укажите название вашего банка:")
             return self.ENTERING_BANK_NAME
-    # --- END OF MAJOR CHANGE ---
 
     async def entering_bank_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
@@ -342,7 +329,6 @@ class ExchangeHandler:
         logger.info(f"[Uid] ({user.id}) - Entered INN: {inn}")
         return await self._show_final_confirmation(update, context)
 
-    # --- START OF NEW HELPER FUNCTION ---
     async def _show_final_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False):
         """Displays the final confirmation message with all details."""
         ud = context.user_data
@@ -380,7 +366,6 @@ class ExchangeHandler:
             await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
         return self.CONFIRMING_EXCHANGE
-    # --- END OF NEW HELPER FUNCTION ---
 
     async def confirming_exchange(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -402,9 +387,6 @@ class ExchangeHandler:
             trx_cost_usd = self.bot.config.trx_cost_usdt
             referral_balance = ud.get('referral_balance', 0.0)
 
-            # --- START OF CHANGE ---
-            # Offer to pay from referral balance if it's sufficient,
-            # regardless of whether it was added to the main payout.
             if referral_balance >= trx_cost_usd:
                 keyboard = [
                     [InlineKeyboardButton(f"✅ Да, оплатить с баланса",
@@ -418,8 +400,7 @@ class ExchangeHandler:
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 return self.ASK_PAY_TRX_FROM_REFERRAL
-            # --- END OF CHANGE ---
-            else:  # Standard TRX flow if there's no referral balance or it's insufficient.
+            else:
                 keyboard = [
                     [InlineKeyboardButton("✅ Согласен", callback_data='send_transfer_trx')],
                     [InlineKeyboardButton("❌ Не согласен", callback_data='back_to_menu')]
@@ -441,14 +422,11 @@ class ExchangeHandler:
         await query.answer()
         ud = context.user_data
 
-        # --- START OF CHANGE ---
-        # This function now only records the user's choice.
-        # All calculations are moved to the final confirmation step.
         if query.data == 'trx_from_ref_yes':
             ud['trx_paid_by_referral'] = True
             logger.info(
                 f"[Uid] ({update.effective_user.id}) - User chose to pay TRX fee from referral balance.")
-        else:  # trx_from_ref_no
+        else:
             ud['trx_paid_by_referral'] = False
             logger.info(
                 f"[Uid] ({update.effective_user.id}) - User chose to pay TRX fee from exchange amount.")
@@ -457,10 +435,7 @@ class ExchangeHandler:
             "✅ Ваш выбор учтен.\n\n📬 Пожалуйста, укажите ваш TRX-кошелек:",
             parse_mode='Markdown'
         )
-        # --- END OF CHANGE ---
         return self.ENTERING_TRX_ADDRESS
-
-    # ... keep all other methods like _process_standard_exchange, resend_messages_for_request etc. the same
 
     async def _process_standard_exchange(self, query: Update, context: ContextTypes.DEFAULT_TYPE, request_id: int):
         user = query.from_user
@@ -505,7 +480,6 @@ class ExchangeHandler:
             amount_display = request_data['amount_currency']
             message_intro = f"🙏 Спасибо за заявку #{request_id}!\n\n"
             if request_data.get('needs_trx'):
-                # В этой версии логика усложнилась, поэтому при восстановлении показываем просто сумму к отправке
                 message_intro = f"✅ Перевод TRX выполнен для заявки #{request_id}.\n\n"
 
             user_text = message_intro + \
@@ -587,25 +561,16 @@ class ExchangeHandler:
         rate = ud['exchange_rate']
         info_text_lines = []
 
-        # --- START OF CHANGE: Centralized Calculation Logic ---
-
-        # The amount of referral balance user chose to add to the main payout
         payout_from_ref_usd = ud.get('total_referral_debit', 0.0)
 
-        # Final amount of USDT user will need to send
         final_amount_to_send_usdt = ud.get('amount')
-        # Final amount of UAH user will receive
         final_sum_uah = ud['original_sum_uah']
-        # Final amount to debit from user's referral balance
         final_total_referral_debit = 0.0
 
         if ud.get('trx_paid_by_referral'):
-            # --- CASE 1: TRX is paid from referral balance ---
             final_total_referral_debit = payout_from_ref_usd
 
             if payout_from_ref_usd > 0:
-                # User is adding payout AND paying TRX from it.
-                # Total debit from ref balance is the whole payout amount.
                 payout_after_trx_usd = payout_from_ref_usd - trx_cost_usd
                 final_sum_uah += payout_after_trx_usd * rate
                 info_text_lines.append(
@@ -613,8 +578,6 @@ class ExchangeHandler:
                 info_text_lines.append(
                     f"🏆 Реф. бонус (за вычетом TRX): +{payout_after_trx_usd * rate:.2f} UAH")
             else:
-                # User is NOT adding payout, but IS paying TRX from balance.
-                # Total debit is just the TRX cost.
                 final_total_referral_debit = trx_cost_usd
                 info_text_lines.append(
                     f"💰 Обмен: {final_amount_to_send_usdt:.2f} {ud['currency']} → {final_sum_uah:.2f} UAH")
@@ -623,12 +586,10 @@ class ExchangeHandler:
                 f"⚡ Комиссия TRX (${trx_cost_usd}) **оплачена с реферального баланса**.")
 
         else:
-            # --- CASE 2: TRX is paid from the exchange amount ---
             final_amount_to_send_usdt -= trx_cost_usd
             final_sum_uah = final_amount_to_send_usdt * rate
 
             if payout_from_ref_usd > 0:
-                # User is adding payout.
                 final_sum_uah += payout_from_ref_usd * rate
                 info_text_lines.append(f"🏆 Реф. бонус: +{payout_from_ref_usd * rate:.2f} UAH")
 
@@ -637,13 +598,11 @@ class ExchangeHandler:
                 0, f"💰 Обмен (сумма к отправке): {final_amount_to_send_usdt:.2f} {ud['currency']}")
             info_text_lines.append(f"⚡ Вычет за TRX из суммы обмена: -${trx_cost_usd}")
 
-        # Update user_data with the final calculated values for DB insertion
         ud['amount'] = final_amount_to_send_usdt
         ud['sum_uah'] = final_sum_uah
         ud['total_referral_debit'] = final_total_referral_debit
 
         info_text = "\n".join(info_text_lines)
-        # --- END OF CHANGE ---
 
         details_text = (
             f"\n\n**Ваши реквизиты для получения выплаты:**\n"
@@ -762,7 +721,6 @@ class ExchangeHandler:
                                   callback_data=f"cancel_by_user_{request_id}")]
         ])
 
-        # Сумма к отправке может меняться, если TRX вычитается из нее
         amount_to_send_usdt = request_data['amount_currency']
 
         msg = await context.bot.send_message(
@@ -891,9 +849,7 @@ class ExchangeHandler:
             await query.edit_message_text(f"❌ Заявка #{request_id} больше не найдена.")
             return ConversationHandler.END
 
-        # --- START OF CHANGE ---
         await self.refund_referral_debit_for_request(request_id)
-        # --- END OF CHANGE ---
 
         if request_data['user_message_id']:
             try:
@@ -935,9 +891,7 @@ class ExchangeHandler:
         logger.info(
             f"[Aid] ({admin_user.id}) - Cancelling request #{request_id} with reason: {reason}")
 
-        # --- START OF CHANGE ---
         await self.refund_referral_debit_for_request(request_id)
-        # --- END OF CHANGE ---
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -1028,7 +982,6 @@ class ExchangeHandler:
             reply_markup=None, parse_mode='Markdown'
         )
 
-    # --- START OF CHANGE ---
     async def refund_referral_debit_for_request(self, request_id: int):
         """
         Checks if a cancelled request used referral funds and refunds them.
@@ -1045,7 +998,6 @@ class ExchangeHandler:
 
         if amount_to_refund > 0:
             user_id = request_data['user_id']
-            # The database operation itself is synchronous, but we call it from an async method.
             self.bot.db.update_referral_balance(user_id, amount_to_refund)
             logger.info(
                 f"[System] - Refunded ${amount_to_refund:.2f} to user {user_id} for cancelled request #{request_id}.")
@@ -1058,7 +1010,6 @@ class ExchangeHandler:
             except Exception as e:
                 logger.error(
                     f"[System] - Failed to send refund notification to user {user_id} for request #{request_id}: {e}")
-    # --- END OF CHANGE ---
 
     async def cancel_request_by_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -1072,10 +1023,7 @@ class ExchangeHandler:
             await query.edit_message_text("❌ Эту заявку уже нельзя отменить.", reply_markup=None)
             return
 
-        # --- START OF CHANGE ---
-        # Refund referral balance BEFORE changing the status
         await self.refund_referral_debit_for_request(request_id)
-        # --- END OF CHANGE ---
 
         self.bot.db.update_request_status(request_id, 'declined')
         await query.edit_message_text(f"✅ Ваша заявка #{request_id} была успешно отменена.", reply_markup=None)
@@ -1111,20 +1059,6 @@ class ExchangeHandler:
         referral_payout = request_data.get('referral_payout_amount', 0.0)
         payout_info = f"💱 {request_data['amount_currency']} {request_data['currency']} → {request_data['amount_uah']:.2f} UAH\n\n"
         if referral_payout > 0:
-            # This logic might need adjustment if amount_uah already includes the payout. Assuming it does.
-            # Let's calculate the original amount for display purposes.
-            # This assumes exchange_rate is stored, which it is.
-            original_amount_uah = request_data['amount_uah'] - \
-                (referral_payout * request_data['exchange_rate'])
-
-            # This part seems complex. Let's simplify the display logic for the admin.
-            # The DB stores the final amount_uah and amount_currency. The referral_payout_amount is separate.
-
-            # Let's re-read create_exchange_request... amount_uah is the final amount.
-            # total_referral_debit is saved as referral_payout_amount.
-            # This means the payout info in admin panel might be slightly confusing.
-            # Let's make it clearer.
-
             payout_info = (
                 f"💱 Обмен: {request_data['amount_currency']} {request_data['currency']}\n"
                 f"🏆 Списано с реф. баланса: ${referral_payout:.2f}\n"
@@ -1142,7 +1076,6 @@ class ExchangeHandler:
 
         if request_data.get('needs_trx'):
             trx_cost_usd = self.bot.config.trx_cost_usdt
-            # Переопределяем base_text для TRX заявок для большей ясности
             title = f"{title} (с TRX)"
             trx_info = f"⚠️ Клиент нуждается в TRX.\n📬 TRX-адрес: `{sanitize(request_data.get('trx_address'))}`"
 
@@ -1254,7 +1187,6 @@ class ExchangeHandler:
             request_id, {'admin_message_ids': json.dumps(new_admin_message_ids)})
 
     def setup_handlers(self, application):
-        # Conversation handler only for the exchange process
         exchange_conv_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(self.start_exchange_convo, pattern='^exchange$')],
             states={
@@ -1274,16 +1206,12 @@ class ExchangeHandler:
                 self.FINAL_CONFIRMING_EXCHANGE_TRX: [CallbackQueryHandler(self.final_confirming_exchange_trx, pattern='^(send_exchange_with_trx|back_to_menu)$')],
             },
             fallbacks=[
-                # This will now ONLY end the conversation
                 CommandHandler('start', self.cancel_and_return_to_menu),
-                # This needs main_menu call
                 CallbackQueryHandler(self.main_menu, pattern='^back_to_menu$')
             ],
-            # Keep per_message=False as it was. It just means conversation state lasts.
             per_message=False
         )
 
-        # Handler for entering the transaction hash
         hash_conv_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(
                 self.ask_for_hash, pattern=r'^user_confirms_sending_')],
@@ -1292,7 +1220,6 @@ class ExchangeHandler:
             fallbacks=[CommandHandler('start', self.cancel_and_return_to_menu)],
         )
 
-        # Handler for the admin-initiated cancellation flow
         cancellation_conv_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(
                 self.start_cancellation_flow, pattern=r'^decline_request_\d+')],
@@ -1305,7 +1232,6 @@ class ExchangeHandler:
                 self.AWAITING_REASON_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_cancellation_with_reason)],
             },
             fallbacks=[
-                # Add /start fallback here too
                 CommandHandler('start', self.cancel_and_return_to_menu),
                 CallbackQueryHandler(self._cancel_cancellation_flow,
                                      pattern='^cancel_decline_process$')
@@ -1313,18 +1239,14 @@ class ExchangeHandler:
             conversation_timeout=300
         )
 
-        # Add conversation handlers to the application
         application.add_handler(exchange_conv_handler)
         application.add_handler(hash_conv_handler)
         application.add_handler(cancellation_conv_handler)
 
-        # Add simple, non-conversation handlers for main menu buttons
         application.add_handler(CallbackQueryHandler(self.show_rate, pattern='^rate$'))
         application.add_handler(CallbackQueryHandler(self.show_help, pattern='^user_help$'))
-        # This handler is crucial: it catches 'back_to_menu' clicks when no conversation is active
         application.add_handler(CallbackQueryHandler(self.main_menu, pattern='^back_to_menu$'))
 
-        # Add other standalone callback handlers for request status updates
         application.add_handler(CallbackQueryHandler(
             self.handle_payment_confirmation, pattern=r'^confirm_payment_\d+'))
         application.add_handler(CallbackQueryHandler(
@@ -1336,8 +1258,4 @@ class ExchangeHandler:
         application.add_handler(CallbackQueryHandler(
             self.cancel_request_by_user, pattern=r'^cancel_by_user_\d+'))
 
-        # The /start command handler
-        # We add this handler to group 1. Conversation handlers are in group 0 by default.
-        # This ensures that if a conversation is active, its '/start' fallback in group 0
-        # is checked before this global '/start' handler in group 1.
         application.add_handler(CommandHandler('start', self.start_command), group=1)

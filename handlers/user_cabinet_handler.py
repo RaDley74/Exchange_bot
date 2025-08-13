@@ -28,7 +28,6 @@ class UserCabinetHandler:
 
     def _format_profile_info(self, profile_data: dict, user_id, username) -> str:
         """Formats user profile data for display in a message."""
-
         referral_balance = profile_data.get('referral_balance', 0.0) if profile_data else 0.0
         header = (
             f"<b>👤 Профиль:</b> @{username or 'N/A'}\n"
@@ -137,7 +136,6 @@ class UserCabinetHandler:
         """
         user = update.effective_user
         logger.info(f"[Uid] ({user.id}) - Canceled cabinet operation.")
-        # Delete the message that triggered the fallback, for cleanliness
         if update.message:
             try:
                 await update.message.delete()
@@ -146,7 +144,6 @@ class UserCabinetHandler:
 
         if 'profile' in context.user_data:
             del context.user_data['profile']
-        # DO NOT call self.bot.exchange_handler.main_menu(update, context) here
         return ConversationHandler.END
 
     def setup_handlers(self, application):
@@ -168,7 +165,7 @@ class UserCabinetHandler:
                 self.EDIT_INN: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.edit_inn_and_save)],
             },
             fallbacks=[
-                CommandHandler('start', self.cancel), # This now just ends the conversation
+                CommandHandler('start', self.cancel),
                 CallbackQueryHandler(self.handle_cabinet_menu, pattern='^back_to_main_menu$')
             ],
             per_message=False

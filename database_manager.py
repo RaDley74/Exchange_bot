@@ -14,9 +14,6 @@ class DatabaseManager:
     This version includes an automatic schema verification to add missing columns.
     """
 
-    # Определяем "идеальную" схему для каждой таблицы.
-    # Ключ - имя таблицы, значение - словарь, где ключ - имя столбца, а значение - его тип и ограничения.
-    # Это центральное место для определения структуры таблиц.
     TABLE_SCHEMAS = {
         'exchange_requests': {
             'id': 'INTEGER PRIMARY KEY AUTOINCREMENT',
@@ -88,29 +85,23 @@ class DatabaseManager:
 
     def _verify_and_add_columns(self):
         """
-        Проверяет каждую таблицу в схеме, находит отсутствующие столбцы и добавляет их.
-        Это заменяет старые, специфические для каждой таблицы, функции _add_missing_columns.
+        Verifies each table in the schema, finds missing columns, and adds them.
+        This replaces older, table-specific _add_missing_columns functions.
         """
         try:
             cursor = self._conn.cursor()
             for table_name, schema_columns in self.TABLE_SCHEMAS.items():
-                # Получаем информацию о существующих столбцах в таблице
                 cursor.execute(f"PRAGMA table_info({table_name});")
                 existing_columns = {row['name'] for row in cursor.fetchall()}
 
-                # Сравниваем с "идеальной" схемой и добавляем недостающие
                 for column_name, column_type in schema_columns.items():
                     if column_name not in existing_columns:
                         try:
-                            # 'PRIMARY KEY' и другие сложные ограничения не могут быть добавлены через ADD COLUMN,
-                            # но это не проблема, так как они будут созданы с помощью CREATE TABLE.
-                            # Эта команда сработает для всех остальных случаев.
                             cursor.execute(
                                 f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type};")
                             logger.info(
                                 f"[System] - Schema migration: Successfully added column '{column_name}' to table '{table_name}'.")
                         except sqlite3.OperationalError as e:
-                            # Логируем ошибку, но не прерываем процесс, чтобы другие столбцы могли быть добавлены
                             logger.error(
                                 f"[System] - Could not add column '{column_name}' to '{table_name}'. It might have constraints not supported by ALTER TABLE (e.g., PRIMARY KEY). Error: {e}")
 
@@ -121,17 +112,15 @@ class DatabaseManager:
 
     def setup_database(self):
         """
-        Создает необходимые таблицы, если они не существуют, а затем проверяет
-        и добавляет все недостающие столбцы в соответствии с TABLE_SCHEMAS.
+        Creates necessary tables if they don't exist, then verifies
+        and adds any missing columns according to TABLE_SCHEMAS.
         """
         if not self._conn:
             self.connect()
 
         try:
             cursor = self._conn.cursor()
-            # 1. Создаем таблицы, если их нет. Это создаст базовую структуру и первичные ключи.
             for table_name, schema_columns in self.TABLE_SCHEMAS.items():
-                # Собираем строку для создания таблицы из нашей схемы
                 columns_defs = [f"'{name}' {typedef}" for name, typedef in schema_columns.items()]
                 create_table_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns_defs)});"
                 cursor.execute(create_table_query)
@@ -139,8 +128,6 @@ class DatabaseManager:
             self._conn.commit()
             logger.info("[System] - Initial table creation check complete.")
 
-            # 2. Проверяем и добавляем все недостающие столбцы.
-            # Это делает миграцию базы данных автоматической.
             self._verify_and_add_columns()
 
             logger.info(
@@ -174,11 +161,8 @@ class DatabaseManager:
             logger.info(
                 f"[Uid] ({user.id}, {user.username}) - Created new exchange request with ID: {request_id}")
 
-            # --- START OF CHANGE ---
-            # Списываем реферальный баланс, если он был использован
             if user_data.get('total_referral_debit', 0.0) > 0:
                 self.update_referral_balance(user.id, -user_data['total_referral_debit'])
-            # --- END OF CHANGE ---
 
             profile_data = {
                 'username': user.username,
@@ -207,7 +191,6 @@ class DatabaseManager:
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    # --- START OF CHANGE ---
     def get_profile_by_id_or_login(self, user_id_or_login: str):
         """
         Retrieves a user profile by their numeric ID or username string.
@@ -218,13 +201,11 @@ class DatabaseManager:
             params = (int(user_id_or_login),)
         else:
             query = "SELECT * FROM user_profiles WHERE username = ?"
-            # Remove "@" from username if present
             params = (user_id_or_login.lstrip('@'),)
 
         cursor.execute(query, params)
         row = cursor.fetchone()
         return dict(row) if row else None
-    # --- END OF CHANGE ---
 
     def create_or_update_user_profile(self, user_id, profile_data: dict):
         """
@@ -346,8 +327,6 @@ class DatabaseManager:
             logger.error(f"[System] - Failed to update data for request {request_id}: {e}")
             self._conn.rollback()
 
-    # --- Referral System Methods ---
-
     def create_referral(self, referrer_id: int, referred_id: int, referred_username: str):
         """Creates a new referral record."""
         query = "INSERT INTO referrals (referrer_id, referred_id, referred_username) VALUES (?, ?, ?)"
@@ -379,12 +358,10 @@ class DatabaseManager:
         cursor = self._conn.cursor()
         offset = (page - 1) * page_size
 
-        # Query to get a slice of referrals
         list_query = "SELECT * FROM referrals WHERE referrer_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
         cursor.execute(list_query, (referrer_id, page_size, offset))
         referrals_on_page = [dict(row) for row in cursor.fetchall()]
 
-        # Query to get the total count for page calculation
         count_query = "SELECT COUNT(*) FROM referrals WHERE referrer_id = ?"
         cursor.execute(count_query, (referrer_id,))
         total_count = cursor.fetchone()[0]
@@ -392,7 +369,6 @@ class DatabaseManager:
         if total_count == 0:
             total_pages = 1
         else:
-            # Calculate the total number of pages, rounding up
             total_pages = (total_count + page_size - 1) // page_size
 
         return referrals_on_page, total_pages
