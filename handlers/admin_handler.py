@@ -178,7 +178,7 @@ class AdminPanelHandler:
         return self.ADMIN_MENU
         
     # --- START: NEW REFERRAL MANAGEMENT METHODS ---
-    async def _show_referral_menu(self, query: Update.callback_query):
+    async def _show_referral_menu(self, query: Update.callback_query): # type: ignore
         """Displays the referral balance management menu."""
         keyboard = [
             [InlineKeyboardButton("➕ Добавить", callback_data='ref_add_balance')],

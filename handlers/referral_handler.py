@@ -121,18 +121,29 @@ class ReferralHandler:
             await update.message.reply_text("Вы не можете использовать свою собственную реферальную ссылку.")
             return await self.bot.exchange_handler.start_command(update, context, called_from_referral=True)
 
+        # Check 1: Prevent user from being referred multiple times
         if not self.bot.db.get_referral_by_referred_id(user.id):
-            self.bot.db.create_referral(referrer_id, user.id, user.username)
-            logger.info(
-                f"[Uid] ({user.id}, {user.username}) registered as a referral of {referrer_id}.")
-            try:
-                await context.bot.send_message(
-                    chat_id=referrer_id,
-                    text=f"🎉 У вас новый реферал: @{user.username or user.id}! Вы получите бонус после его первой успешной сделки."
-                )
-            except Exception as e:
-                logger.error(f"Failed to send notification to referrer {referrer_id}: {e}")
 
+            # Check 2: Prevent existing users from becoming referrals.
+            # A user is "existing" if they already have a profile.
+            if self.bot.db.get_user_profile(user.id) is not None:
+                logger.info(
+                    f"[Uid] ({user.id}) clicked referral link from {referrer_id} but is already a registered user. Ignoring referral.")
+            else:
+                # This is a new user who has not been referred before. Proceed to register them.
+                self.bot.db.create_referral(referrer_id, user.id, user.username)
+                logger.info(
+                    f"[Uid] ({user.id}, {user.username}) registered as a referral of {referrer_id}.")
+                try:
+                    await context.bot.send_message(
+                        chat_id=referrer_id,
+                        text=f"🎉 У вас новый реферал: @{user.username or user.id}! Вы получите бонус после его первой успешной сделки."
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send notification to referrer {referrer_id}: {e}")
+
+        # In all cases, proceed to the main menu for the user.
+        # The `create_or_update_user_profile` call in `start_command` will create their profile if it doesn't exist.
         await self.bot.exchange_handler.start_command(update, context, called_from_referral=True)
 
     async def credit_referrer(self, referred_user_id: int):
@@ -151,12 +162,18 @@ class ReferralHandler:
         logger.info(
             f"Credited ${self.REFERRAL_BONUS} to {referrer_id} for referral {referred_user_id}.")
 
+        # --- START OF CHANGE ---
+        # Prepare the referred user's display name for the notification
+        referred_username = referral.get('referred_username')
+        referred_user_display = f"@{referred_username}" if referred_username else f"пользователь (ID: {referred_user_id})"
+
         try:
             await self.bot.application.bot.send_message(
                 chat_id=referrer_id,
-                text=f"✅ Поздравляем! Ваш реферал совершил первую сделку. Вам начислено **${self.REFERRAL_BONUS}**.",
+                text=f"✅ Поздравляем! Ваш реферал {referred_user_display} совершил первую сделку. Вам начислено **${self.REFERRAL_BONUS}**.",
                 parse_mode='Markdown'
             )
+        # --- END OF CHANGE ---
         except Exception as e:
             logger.error(f"Failed to send bonus notification to referrer {referrer_id}: {e}")
 
