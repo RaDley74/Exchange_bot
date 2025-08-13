@@ -21,7 +21,8 @@ class ExchangeHandler:
         ENTERING_CARD_NUMBER, ENTERING_FIO_DETAILS, ENTERING_INN_DETAILS, CONFIRMING_EXCHANGE,
         CONFIRMING_EXCHANGE_TRX, ENTERING_TRX_ADDRESS, FINAL_CONFIRMING_EXCHANGE_TRX,
         ENTERING_HASH, SELECTING_CANCELLATION_TYPE, AWAITING_REASON_TEXT,
-    ) = range(15)
+        ASK_USE_REFERRAL_BALANCE, ASK_PAY_TRX_FROM_REFERRAL,
+    ) = range(17)
 
     def __init__(self, bot_instance):
         self.bot = bot_instance
@@ -186,14 +187,60 @@ class ExchangeHandler:
         context.user_data['amount'] = amount
         sum_uah = amount * current_rate
         context.user_data['sum_uah'] = sum_uah
+        context.user_data['original_sum_uah'] = sum_uah
         logger.info(
             f"[Uid] ({user.id}) - Entered amount: {amount} {context.user_data['currency']}. Calculated sum: {sum_uah:.2f} UAH.")
 
-        # Check for existing, valid profile data
         profile_data = self.bot.db.get_user_profile(user.id)
-        # Check that at least one key field is filled
+        referral_balance = profile_data.get('referral_balance', 0.0) if profile_data else 0.0
+
+        if referral_balance > 0:
+            context.user_data['referral_balance'] = referral_balance
+            keyboard = [
+                [InlineKeyboardButton("✅ Да, добавить к обмену", callback_data='ref_payout_yes')],
+                [InlineKeyboardButton("❌ Нет, оставить на балансе", callback_data='ref_payout_no')]
+            ]
+            await update.message.reply_text(
+                f"💰 На вашем реферальном балансе есть ${referral_balance:.2f}.\n\n"
+                "Хотите добавить эти средства к текущему обмену?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return self.ASK_USE_REFERRAL_BALANCE
+        else:
+            return await self._proceed_to_requisites(update, context, is_callback=False)
+
+    async def ask_use_referral_balance(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        query = update.callback_query
+        await query.answer()
+        ud = context.user_data
+
+        if query.data == 'ref_payout_yes':
+            referral_balance_usd = ud.get('referral_balance', 0.0)
+            rate = ud.get('exchange_rate')
+            referral_payout_uah = referral_balance_usd * rate
+
+            ud['total_referral_debit'] = referral_balance_usd
+            ud['sum_uah'] += referral_payout_uah  # Добавляем к основной сумме
+
+            logger.info(
+                f"[Uid] ({update.effective_user.id}) - User chose to use referral balance of ${referral_balance_usd:.2f}.")
+
+        return await self._proceed_to_requisites(update, context, is_callback=True)
+
+    async def _proceed_to_requisites(self, update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool) -> int:
+        user = update.effective_user
+        profile_data = self.bot.db.get_user_profile(user.id)
         has_profile = profile_data and any(profile_data.get(key)
                                            for key in ['bank_name', 'fio', 'card_number', 'inn'])
+
+        ud = context.user_data
+        message_text = f"✅ Хорошо! К оплате: {ud['sum_uah']:.2f} UAH.\n\n"
+
+        if ud.get('total_referral_debit', 0.0) > 0:
+            message_text = (
+                f"✅ Отлично! Ваш реферальный баланс будет добавлен к выплате.\n\n"
+                f"💰 Итого к получению: **{ud['sum_uah']:.2f} UAH**.\n\n"
+            )
 
         if has_profile:
             keyboard = [
@@ -202,16 +249,20 @@ class ExchangeHandler:
                 [InlineKeyboardButton("📝 Нет, ввести новые", callback_data='profile_no')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                f"✅ Хорошо! К оплате: {sum_uah:.2f} UAH.\n\n"
-                "У вас есть сохраненные реквизиты. Использовать их для этого обмена?",
-                reply_markup=reply_markup
-            )
+            message_text += "У вас есть сохраненные реквизиты. Использовать их для этого обмена?"
+
+            if is_callback:
+                await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
+            else:
+                await update.message.reply_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
             return self.ASK_USE_PROFILE_REQUISITES
         else:
-            await update.message.reply_text(
-                f"✅ Хорошо! К оплате: {sum_uah:.2f} UAH.\n\n🏦 Пожалуйста, укажите название банка."
-            )
+            message_text += "🏦 Пожалуйста, укажите название банка."
+            if is_callback:
+                await update.callback_query.edit_message_text(message_text, parse_mode='Markdown')
+            else:
+                await update.message.reply_text(message_text, parse_mode='Markdown')
+
             return self.ENTERING_BANK_NAME
 
     async def ask_use_profile_requisites(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -295,15 +346,27 @@ class ExchangeHandler:
     async def _show_final_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False):
         """Displays the final confirmation message with all details."""
         ud = context.user_data
-        text = (
-            f"💰 Обмен {ud['amount']} {ud['currency']} на {ud['sum_uah']:.2f} UAH.\n\n"
-            f"🏦 Банк: `{ud.get('bank_name', 'Не указан')}`\n"
+
+        main_exchange_text = f"💰 Обмен {ud['amount']} {ud['currency']} на {ud['original_sum_uah']:.2f} UAH."
+
+        referral_text = ""
+        if ud.get('total_referral_debit', 0.0) > 0:
+            referral_payout_uah = ud['sum_uah'] - ud['original_sum_uah']
+            referral_text = f"\n🏆 Реферальный бонус: +{referral_payout_uah:.2f} UAH (списано ${ud['total_referral_debit']:.2f})."
+
+        total_text = f"\n\n💸 **Итого к получению: {ud['sum_uah']:.2f} UAH**"
+
+        details_text = (
+            f"\n\n🏦 Банк: `{ud.get('bank_name', 'Не указан')}`\n"
             f"👤 ФИО: `{ud.get('fio', 'Не указано')}`\n"
             f"💳 IBAN: `{ud.get('card_info', 'Не указан')}`\n"
             f"🔢 Номер карты: `{ud.get('card_number', 'Не указан')}`\n"
             f"🆔 ІПН/ЄДРПОУ: `{ud.get('inn', 'Не указан')}`\n\n"
-            "👉 Нажмите 'Отправить' для подтверждения или 'Получить TRX', если вам нужен TRX для комиссии."
         )
+
+        text = main_exchange_text + referral_text + total_text + details_text + \
+            "👉 Нажмите 'Отправить' для подтверждения или 'Получить TRX', если вам нужен TRX для комиссии."
+
         keyboard = [
             [InlineKeyboardButton("✅ Отправить", callback_data='send_exchange')],
             [InlineKeyboardButton("🚀 Получить TRX", callback_data='send_exchange_trx')],
@@ -323,10 +386,11 @@ class ExchangeHandler:
         query = update.callback_query
         await query.answer()
         data = query.data
+        ud = context.user_data
 
         if data == 'send_exchange':
-            context.user_data.pop('trx_address', None)
-            request_id = self.bot.db.create_exchange_request(query.from_user, context.user_data)
+            ud.pop('trx_address', None)
+            request_id = self.bot.db.create_exchange_request(query.from_user, ud)
             if not request_id:
                 await query.edit_message_text("❌ Произошла ошибка при создании заявки. Попробуйте снова.")
                 return ConversationHandler.END
@@ -335,20 +399,67 @@ class ExchangeHandler:
             return ConversationHandler.END
 
         elif data == 'send_exchange_trx':
-            keyboard = [
-                [InlineKeyboardButton("✅ Согласен", callback_data='send_transfer_trx')],
-                [InlineKeyboardButton("❌ Не согласен", callback_data='back_to_menu')]
-            ]
-            await query.edit_message_text(
-                "⚡ Вам будет предоставлено **15 USDT** в TRX для оплаты комиссии, которые будут вычтены из общей суммы обмена.\n\n"
-                "💡 Эти средства позволят безопасно завершить транзакцию.",
-                reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown'
-            )
-            return self.CONFIRMING_EXCHANGE_TRX
+            trx_cost_usd = self.bot.config.trx_cost_usdt
+            referral_balance = ud.get('referral_balance', 0.0)
+
+            # Проверяем, был ли использован реферальный баланс и достаточен ли он для оплаты TRX
+            if ud.get('total_referral_debit', 0.0) > 0 and referral_balance >= trx_cost_usd:
+                keyboard = [
+                    [InlineKeyboardButton(f"✅ Да, оплатить с баланса",
+                                          callback_data='trx_from_ref_yes')],
+                    [InlineKeyboardButton(f"❌ Нет, вычесть из обмена",
+                                          callback_data='trx_from_ref_no')]
+                ]
+                await query.edit_message_text(
+                    f"🚀 Вы можете оплатить комиссию за TRX (${trx_cost_usd}) из вашего реферального баланса (${referral_balance:.2f}).\n\n"
+                    "Хотите это сделать?",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                return self.ASK_PAY_TRX_FROM_REFERRAL
+
+            else:  # Стандартный флоу TRX, если нет реф. баланса или его не хватает
+                keyboard = [
+                    [InlineKeyboardButton("✅ Согласен", callback_data='send_transfer_trx')],
+                    [InlineKeyboardButton("❌ Не согласен", callback_data='back_to_menu')]
+                ]
+                await query.edit_message_text(
+                    f"⚡ Вам будет предоставлено **{trx_cost_usd} USDT** в TRX для оплаты комиссии, которые будут вычтены из общей суммы обмена.\n\n"
+                    "💡 Эти средства позволят безопасно завершить транзакцию.",
+                    reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown'
+                )
+                return self.CONFIRMING_EXCHANGE_TRX
+
         elif data == 'back_to_menu':
             await self.main_menu(update, context)
             return ConversationHandler.END
         return ConversationHandler.END
+
+    async def ask_pay_trx_from_referral(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        query = update.callback_query
+        await query.answer()
+        ud = context.user_data
+        trx_cost_usd = self.bot.config.trx_cost_usdt
+
+        if query.data == 'trx_from_ref_yes':
+            ud['trx_paid_by_referral'] = True
+            # Общая сумма списания с реф. баланса не меняется, но пересчитываем выплату
+            payout_from_referral_usd = ud['total_referral_debit'] - trx_cost_usd
+            ud['sum_uah'] = ud['original_sum_uah'] + \
+                (payout_from_referral_usd * ud['exchange_rate'])
+            logger.info(
+                f"[Uid] ({update.effective_user.id}) - User chose to pay TRX fee from referral balance.")
+        else:  # trx_from_ref_no
+            ud['trx_paid_by_referral'] = False
+            # Сумма выплаты не меняется, но TRX вычитается из основной суммы
+            logger.info(
+                f"[Uid] ({update.effective_user.id}) - User chose to pay TRX fee from exchange amount.")
+
+        await query.edit_message_text(
+            "✅ Ваш выбор учтен.\n\n📬 Пожалуйста, укажите ваш TRX-кошелек:",
+            parse_mode='Markdown'
+        )
+        return self.ENTERING_TRX_ADDRESS
+
     # ... keep all other methods like _process_standard_exchange, resend_messages_for_request etc. the same
 
     async def _process_standard_exchange(self, query: Update, context: ContextTypes.DEFAULT_TYPE, request_id: int):
@@ -394,7 +505,7 @@ class ExchangeHandler:
             amount_display = request_data['amount_currency']
             message_intro = f"🙏 Спасибо за заявку #{request_id}!\n\n"
             if request_data.get('needs_trx'):
-                amount_display -= 15
+                # В этой версии логика усложнилась, поэтому при восстановлении показываем просто сумму к отправке
                 message_intro = f"✅ Перевод TRX выполнен для заявки #{request_id}.\n\n"
 
             user_text = message_intro + \
@@ -451,7 +562,7 @@ class ExchangeHandler:
         await query.answer()
         user = query.from_user
         if query.data == 'send_transfer_trx':
-            logger.info(f"[Uid] ({user.id}) - Confirmed the TRX request.")
+            logger.info(f"[Uid] ({user.id}) - Confirmed the TRX request (standard flow).")
             await query.edit_message_text(
                 "✅ Вы подтвердили запрос на TRX.\n\n📬 Пожалуйста, укажите ваш TRX-кошелек:",
                 parse_mode='Markdown'
@@ -471,25 +582,57 @@ class ExchangeHandler:
 
         logger.info(f"[Uid] ({user.id}) - Entered TRX address.")
         context.user_data['trx_address'] = trx_address
+        ud = context.user_data
+        trx_cost_usd = self.bot.config.trx_cost_usdt
 
-        rate_for_this_request = context.user_data['exchange_rate']
-        amount = context.user_data['amount']
-        final_amount = amount - 15
-        final_sum_uah = final_amount * rate_for_this_request
+        # Пересчитываем финальные суммы для подтверждения
+        amount_to_send_usdt = ud['amount']
+        final_sum_uah = ud['sum_uah']
+        info_text = ""
 
-        context.user_data['final_amount'] = final_amount
-        context.user_data['final_sum_uah'] = final_sum_uah
+        if ud.get('trx_paid_by_referral'):
+            info_text = (
+                f"💰 Обмен: {ud['amount']} {ud['currency']} → {ud['original_sum_uah']:.2f} UAH\n"
+                f"🏆 Реф. бонус (за вычетом TRX): +{final_sum_uah - ud['original_sum_uah']:.2f} UAH\n"
+                f"⚡ Комиссия TRX (${trx_cost_usd}) **оплачена с реферального баланса**.\n"
+            )
+        else:  # Стандартный вычет TRX
+            amount_to_send_usdt -= trx_cost_usd
+            final_sum_uah = (amount_to_send_usdt *
+                             ud['exchange_rate']) + (ud['sum_uah'] - ud['original_sum_uah'])
+            ud['amount'] = amount_to_send_usdt  # Обновляем сумму в валюте для отправки
+            ud['sum_uah'] = final_sum_uah  # Обновляем итоговую сумму в UAH
+            info_text = (
+                f"💰 Обмен: {ud['amount']} {ud['currency']}\n"
+                f"⚡ Вычет за TRX: -${trx_cost_usd}\n"
+            )
+            if ud.get('total_referral_debit', 0.0) > 0:
+                referral_payout_uah = ud['sum_uah'] - (amount_to_send_usdt * ud['exchange_rate'])
+                info_text += f"🏆 Реф. бонус: +{referral_payout_uah:.2f} UAH\n"
+
+        # --- START OF CHANGE ---
+        details_text = (
+            f"\n\n**Ваши реквизиты для получения выплаты:**\n"
+            f"🏦 Банк: `{ud.get('bank_name', 'Не указан')}`\n"
+            f"👤 ФИО: `{ud.get('fio', 'Не указано')}`\n"
+            f"💳 IBAN: `{ud.get('card_info', 'Не указан')}`\n"
+            f"🔢 Номер карты: `{ud.get('card_number', 'Не указан')}`\n"
+            f"🆔 ІПН/ЄДРПОУ: `{ud.get('inn', 'Не указан')}`"
+        )
+        # --- END OF CHANGE ---
 
         keyboard = [
             [InlineKeyboardButton("✅ Отправить", callback_data='send_exchange_with_trx')],
             [InlineKeyboardButton("❌ Отмена", callback_data='back_to_menu')]
         ]
+
         await update.message.reply_text(
-            f"📋 Ваша информация:\n\n"
-            f"💰 Обмен: {amount} {context.user_data['currency']} → {context.user_data['sum_uah']:.2f} UAH\n"
-            f"💱 Сумма которую вы получите на карту с учетом вычета TRX: {final_amount} {context.user_data['currency']} → {final_sum_uah:.2f} UAH\n\n"
-            f"⚡ Вам будет отправлено **15 USDT** в TRX.\n\n"
-            f"🔗 TRX-адрес: {trx_address}\n\n👉 Нажмите 'Отправить' для подтверждения.",
+            f"📋 **Проверьте информацию:**\n\n"
+            f"{info_text}"
+            f"💸 **Итого к получению: {final_sum_uah:.2f} UAH**"
+            f"{details_text}\n\n"
+            f"🔗 Ваш TRX-адрес для получения комиссии: `{trx_address}`\n\n"
+            f"👉 Нажмите 'Отправить' для окончательного подтверждения.",
             reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown'
         )
         return self.FINAL_CONFIRMING_EXCHANGE_TRX
@@ -554,7 +697,7 @@ class ExchangeHandler:
 
         base_admin_text, _ = self._prepare_admin_notification(request_data)
         final_admin_text = base_admin_text + \
-            f"\n\n✅2️⃣ Пользователь подтвердил перевод {request_data['amount_currency']} {request_data['currency']}. \n\n 🔒 Hash: `{submitted_hash}`"
+            f"\n\n✅2️⃣ Пользователь подтвердил перевод. \n\n 🔒 Hash: `{submitted_hash}`"
 
         admin_keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Средства получены",
@@ -582,11 +725,17 @@ class ExchangeHandler:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Я совершил(а) перевод",
                                   callback_data=f"user_confirms_sending_{request_id}")],
+            [InlineKeyboardButton("❌ Отменить заявку",
+                                  callback_data=f"cancel_by_user_{request_id}")]
         ])
+
+        # Сумма к отправке может меняться, если TRX вычитается из нее
+        amount_to_send_usdt = request_data['amount_currency']
+
         msg = await context.bot.send_message(
             chat_id=request_data['user_id'],
             text=(f"✅ Перевод TRX выполнен для заявки #{request_id}.\n\n"
-                  f"📥 Переведите {(request_data['amount_currency']):.2f} {request_data['currency']} на кошелек:\n"
+                  f"📥 Переведите {amount_to_send_usdt:.2f} {request_data['currency']} на кошелек:\n"
                   f"`{self.bot.config.wallet_address}`\n\n"
                   "После перевода нажмите кнопку ниже."),
             reply_markup=keyboard, parse_mode='Markdown'
@@ -879,8 +1028,19 @@ class ExchangeHandler:
                                   f"🔢 Номер карты: `{sanitize(request_data.get('card_number'))}`\n"
                                   f"📇 ИНН: `{sanitize(request_data.get('inn'))}`\n\n")
 
+        referral_payout = request_data.get('referral_payout_amount', 0.0)
+        payout_info = f"💱 {request_data['amount_currency']} {request_data['currency']} → {request_data['amount_uah']:.2f} UAH\n\n"
+        if referral_payout > 0:
+            original_amount_uah = request_data['amount_uah'] - \
+                (referral_payout * request_data['exchange_rate'])
+            payout_info = (
+                f"💱 {request_data['amount_currency']} {request_data['currency']} → {original_amount_uah:.2f} UAH\n"
+                f"🏆 + Реф. выплата: ${referral_payout:.2f}\n"
+                f"💸 **Итого к выплате: {request_data['amount_uah']:.2f} UAH**\n\n"
+            )
+
         base_text = (f"{title}\n\n"
-                     f"💱 {request_data['amount_currency']} {request_data['currency']} → {request_data['amount_uah']:.2f} UAH\n\n"
+                     f"{payout_info}"
                      f"{user_info_block}{transfer_details_block}")
 
         keyboard = InlineKeyboardMarkup([
@@ -889,15 +1049,16 @@ class ExchangeHandler:
         ])
 
         if request_data.get('needs_trx'):
-            rate = request_data.get('exchange_rate') or self.bot.config.exchange_rate
-            amount, sum_uah = request_data['amount_currency'], request_data['amount_uah']
-            final_amount, final_sum_uah = amount - 15, (amount - 15) * rate
+            trx_cost_usd = self.bot.config.trx_cost_usdt
+            # Переопределяем base_text для TRX заявок для большей ясности
+            title = f"{title} (с TRX)"
+            trx_info = f"⚠️ Клиент нуждается в TRX.\n📬 TRX-адрес: `{sanitize(request_data.get('trx_address'))}`"
 
-            base_text = (f"{title} (с TRX)\n\n"
-                         f"💱 {amount} {request_data['currency']} → {sum_uah:.2f} UAH\n"
-                         f"💵 После вычета TRX: {final_amount} {request_data['currency']} → {final_sum_uah:.2f} UAH\n\n"
+            base_text = (f"{title}\n\n"
+                         f"{payout_info}"
                          f"{user_info_block}{transfer_details_block}"
-                         f"⚠️ Клиент нуждается в TRX.\n📬 TRX-адрес: `{sanitize(request_data.get('trx_address'))}`")
+                         f"{trx_info}")
+
             if request_data['status'] == 'awaiting trx transfer':
                 keyboard = InlineKeyboardMarkup([
                     [InlineKeyboardButton(
@@ -1007,6 +1168,7 @@ class ExchangeHandler:
             states={
                 self.CHOOSING_CURRENCY: [CallbackQueryHandler(self.choosing_currency, pattern='^(currency_usdt|back_to_menu)$')],
                 self.ENTERING_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_amount)],
+                self.ASK_USE_REFERRAL_BALANCE: [CallbackQueryHandler(self.ask_use_referral_balance, pattern='^ref_payout_(yes|no)$')],
                 self.ASK_USE_PROFILE_REQUISITES: [CallbackQueryHandler(self.ask_use_profile_requisites, pattern='^profile_(yes|no)$')],
                 self.ENTERING_BANK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_bank_name)],
                 self.ENTERING_CARD_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_card_details)],
@@ -1014,6 +1176,7 @@ class ExchangeHandler:
                 self.ENTERING_FIO_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_fio_details)],
                 self.ENTERING_INN_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_inn_details)],
                 self.CONFIRMING_EXCHANGE: [CallbackQueryHandler(self.confirming_exchange, pattern='^(send_exchange|send_exchange_trx|back_to_menu)$')],
+                self.ASK_PAY_TRX_FROM_REFERRAL: [CallbackQueryHandler(self.ask_pay_trx_from_referral, pattern='^trx_from_ref_(yes|no)$')],
                 self.CONFIRMING_EXCHANGE_TRX: [CallbackQueryHandler(self.confirming_exchange_trx, pattern='^(send_transfer_trx|back_to_menu)$')],
                 self.ENTERING_TRX_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.entering_trx_address)],
                 self.FINAL_CONFIRMING_EXCHANGE_TRX: [CallbackQueryHandler(self.final_confirming_exchange_trx, pattern='^(send_exchange_with_trx|back_to_menu)$')],

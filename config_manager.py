@@ -56,6 +56,7 @@ class ConfigManager:
             'ADMIN_PASSWORD': 'your_admin_password_here',
             'WALLET_ADDRESS': 'your_wallet_address_here',
             'SUPPORT_CONTACT': 'your_support_contact_here',
+            'TRX_COST_USDT': '15.0',
             'BOT_ENABLED': 'True'
         }
 
@@ -136,6 +137,10 @@ class ConfigManager:
     @support_contact.setter
     def support_contact(self, value: str):
         self.set('Settings', 'SUPPORT_CONTACT', value)
+
+    @property
+    def trx_cost_usdt(self) -> float:
+        return float(self.get('Settings', 'TRX_COST_USDT', '15.0'))
 
     @property
     def bot_enabled(self) -> bool:

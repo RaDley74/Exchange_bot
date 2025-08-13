@@ -106,7 +106,8 @@ class AdminPanelHandler:
             try:
                 await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
             except TelegramError as e:
-                logger.warning(f"[Aid] ({user.id}, {user.username}) - Failed to edit the menu message, sending a new one. Error: {e}")
+                logger.warning(
+                    f"[Aid] ({user.id}, {user.username}) - Failed to edit the menu message, sending a new one. Error: {e}")
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=text,
@@ -169,7 +170,8 @@ class AdminPanelHandler:
             await update.message.reply_text("❌ ID заявки должен быть числом. Попробуйте снова.")
             return self.AWAIT_REQUEST_ID_FOR_STATUS_CHANGE
 
-        logger.info(f"[Aid] ({admin_user.id}, {admin_user.username}) - Wants to change status for request #{request_id}.")
+        logger.info(
+            f"[Aid] ({admin_user.id}, {admin_user.username}) - Wants to change status for request #{request_id}.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -261,7 +263,8 @@ class AdminPanelHandler:
             await update.message.reply_text("❌ ID заявки должен быть числом. Попробуйте снова.")
             return self.AWAIT_REQUEST_ID_FOR_RESTORE
 
-        logger.info(f"[Aid] ({admin_user.id}, {admin_user.username}) - Trying to restore application #{request_id}.")
+        logger.info(
+            f"[Aid] ({admin_user.id}, {admin_user.username}) - Trying to restore application #{request_id}.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -277,15 +280,18 @@ class AdminPanelHandler:
         try:
             await self.bot.exchange_handler.resend_messages_for_request(request_id)
             await update.message.reply_text(f"✅ Сообщения для заявки #{request_id} были успешно пересозданы для пользователя и администраторов.")
-            logger.info(f"[Aid] ({admin_user.id}, {admin_user.username}) - Successfully restored messages for application #{request_id}.")
+            logger.info(
+                f"[Aid] ({admin_user.id}, {admin_user.username}) - Successfully restored messages for application #{request_id}.")
         except Exception as e:
             await update.message.reply_text(f"🚫 Произошла ошибка при восстановлении заявки: {e}")
-            logger.error(f"[Aid] ({admin_user.id}, {admin_user.username}) - Failed to restore application #{request_id}: {e}", exc_info=True)
+            logger.error(
+                f"[Aid] ({admin_user.id}, {admin_user.username}) - Failed to restore application #{request_id}: {e}", exc_info=True)
 
         return await self._show_main_menu(update, context)
 
     async def _delete_old_messages(self, request_data: dict, context: ContextTypes.DEFAULT_TYPE):
-        logger.info(f"[System] - Attempting to delete old messages for request #{request_data['id']}.")
+        logger.info(
+            f"[System] - Attempting to delete old messages for request #{request_data['id']}.")
 
         if request_data['user_message_id']:
             try:
@@ -296,7 +302,8 @@ class AdminPanelHandler:
                 logger.info(
                     f"[System] - Deleted old message {request_data['user_message_id']} for user {request_data['user_id']}.")
             except TelegramError as e:
-                logger.warning(f"[System] - Failed to delete message for user {request_data['user_id']}: {e}")
+                logger.warning(
+                    f"[System] - Failed to delete message for user {request_data['user_id']}: {e}")
 
         if request_data['admin_message_ids']:
             try:
@@ -304,9 +311,11 @@ class AdminPanelHandler:
                 for admin_id, message_id in admin_message_ids.items():
                     try:
                         await context.bot.delete_message(chat_id=admin_id, message_id=message_id)
-                        logger.info(f"[System] - Deleted old message {message_id} for admin {admin_id}.")
+                        logger.info(
+                            f"[System] - Deleted old message {message_id} for admin {admin_id}.")
                     except TelegramError as e:
-                        logger.warning(f"[System] - Failed to delete message for admin {admin_id}: {e}")
+                        logger.warning(
+                            f"[System] - Failed to delete message for admin {admin_id}: {e}")
             except (json.JSONDecodeError, TypeError) as e:
                 logger.error(
                     f"[System] - Failed to parse admin_message_ids for request #{request_data['id']}: {e}")
@@ -341,7 +350,8 @@ class AdminPanelHandler:
     async def show_user_applications(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_input = update.message.text.strip()
         admin_user = update.effective_user
-        logger.info(f"[Aid] ({admin_user.id}, {admin_user.username}) - Searching for user applications: {user_input}")
+        logger.info(
+            f"[Aid] ({admin_user.id}, {admin_user.username}) - Searching for user applications: {user_input}")
 
         all_applications = self.bot.db.get_request_by_user_id_or_login(user_input)
         logger.info(f"[System] - Found applications for '{user_input}': {len(all_applications)}.")
@@ -357,13 +367,32 @@ class AdminPanelHandler:
         return await self._show_main_menu(update, context)
 
     def _format_application_info(self, app) -> str:
+        referral_payout = app.get('referral_payout_amount', 0.0)
+        payout_info = ""
+        # Рассчитываем сумму в UAH без учета реферальных
+        original_amount_uah = app['amount_uah']
+        if referral_payout > 0:
+            # Если есть реферальная выплата, amount_uah в базе уже включает ее.
+            # Для корректного отображения нам нужно ее вычесть.
+            # Однако, для избежания путаницы, предположим, что amount_uah не меняется, а payout_info добавляется
+            total_uah = app['amount_uah']  # total_uah уже содержит реферальные
+            original_amount_uah_calc = total_uah - (referral_payout * app['exchange_rate'])
+
+            payout_info = (
+                f"<b>Сумма (UAH) без реф:</b> {original_amount_uah_calc:.2f}\n"
+                f"<b>Вывод с реф. баланса ($):</b> {referral_payout:.2f}\n"
+                f"<b>ИТОГО к выплате (UAH):</b> {total_uah:.2f}\n"
+            )
+        else:
+            payout_info = f"<b>Сумма (UAH):</b> {app['amount_uah']:.2f}\n"
+
         return (
             f"<b>Заявка ID:</b> <code>{app['id']}</code>\n"
             f"<b>Пользователь:</b> @{app['username']} (<code>{app['user_id']}</code>)\n"
             f"<b>Статус:</b> {self.bot.exchange_handler.translate_status(app['status'])}\n"
             f"<b>Валюта:</b> {app['currency']}\n"
             f"<b>Сумма (валюта):</b> {app['amount_currency']}\n"
-            f"<b>Сумма (UAH):</b> {app['amount_uah']}\n"
+            f"{payout_info}"
             f"<b>Банк:</b> {app['bank_name']}\n"
             f"<b>IBAN:</b> <code>{app['card_info']}</code>\n"
             f"<b>Номер карты:</b> <code>{app['card_number'] or 'Не указан'}</code>\n"

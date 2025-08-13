@@ -38,7 +38,8 @@ class DatabaseManager:
             'admin_message_ids': 'TEXT',
             'user_message_id': 'INTEGER',
             'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
-            'updated_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
+            'updated_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+            'referral_payout_amount': 'REAL DEFAULT 0.0'
         },
         'user_profiles': {
             'user_id': 'INTEGER PRIMARY KEY',
@@ -155,15 +156,16 @@ class DatabaseManager:
         """
         query = """
         INSERT INTO exchange_requests 
-        (user_id, username, status, currency, amount_currency, amount_uah, exchange_rate, bank_name, card_info, card_number, fio, inn, needs_trx, trx_address)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (user_id, username, status, currency, amount_currency, amount_uah, exchange_rate, bank_name, card_info, card_number, fio, inn, needs_trx, trx_address, referral_payout_amount)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             user.id, user.username, 'awaiting payment', user_data.get(
                 'currency'), user_data.get('amount'),
             user_data.get('sum_uah'), user_data.get('exchange_rate'), user_data.get('bank_name'),
             user_data.get('card_info'), user_data.get('card_number'), user_data.get('fio'),
-            user_data.get('inn'), 'trx_address' in user_data, user_data.get('trx_address')
+            user_data.get('inn'), 'trx_address' in user_data, user_data.get('trx_address'),
+            user_data.get('total_referral_debit', 0.0)
         )
         try:
             cursor = self._conn.cursor()
@@ -171,6 +173,12 @@ class DatabaseManager:
             request_id = cursor.lastrowid
             logger.info(
                 f"[Uid] ({user.id}, {user.username}) - Created new exchange request with ID: {request_id}")
+
+            # --- START OF CHANGE ---
+            # Списываем реферальный баланс, если он был использован
+            if user_data.get('total_referral_debit', 0.0) > 0:
+                self.update_referral_balance(user.id, -user_data['total_referral_debit'])
+            # --- END OF CHANGE ---
 
             profile_data = {
                 'username': user.username,
