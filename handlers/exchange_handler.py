@@ -177,7 +177,7 @@ class ExchangeHandler:
         context.user_data['sum_uah'] = sum_uah
         context.user_data['original_sum_uah'] = sum_uah
         logger.info(
-            f"[Uid] ({user.id}) - Entered amount: {amount} {context.user_data['currency']}. Calculated sum: {sum_uah:.2f} UAH.")
+            f"[Uid] ({user.id}, {user.username}) - Entered amount: {amount} {context.user_data['currency']}. Calculated sum: {sum_uah:.2f} UAH.")
 
         profile_data = self.bot.db.get_user_profile(user.id)
         referral_balance = profile_data.get('referral_balance', 0.0) if profile_data else 0.0
@@ -210,8 +210,9 @@ class ExchangeHandler:
             ud['total_referral_debit'] = referral_balance_usd
             ud['sum_uah'] += referral_payout_uah
 
+            user = update.effective_user
             logger.info(
-                f"[Uid] ({update.effective_user.id}) - User chose to use referral balance of ${referral_balance_usd:.2f}.")
+                f"[Uid] ({user.id}, {user.username}) - User chose to use referral balance of ${referral_balance_usd:.2f}.")
 
         return await self._proceed_to_requisites(update, context, is_callback=True)
 
@@ -262,11 +263,11 @@ class ExchangeHandler:
         if query.data == 'profile_yes':
             profile_data = self.bot.db.get_user_profile(user.id)
             context.user_data.update(profile_data)
-            logger.info(f"[Uid] ({user.id}) - Chose to use saved profile requisites.")
+            logger.info(f"[Uid] ({user.id}, {user.username}) - Chose to use saved profile requisites.")
             return await self._show_final_confirmation(update, context, is_callback=True)
 
         elif query.data == 'profile_no':
-            logger.info(f"[Uid] ({user.id}) - Chose to enter new requisites.")
+            logger.info(f"[Uid] ({user.id}, {user.username}) - Chose to enter new requisites.")
             await query.edit_message_text("🏦 Пожалуйста, укажите название вашего банка:")
             return self.ENTERING_BANK_NAME
 
@@ -278,7 +279,7 @@ class ExchangeHandler:
             return self.ENTERING_BANK_NAME
 
         context.user_data['bank_name'] = bank_name
-        logger.info(f"[Uid] ({user.id}) - Entered bank: {bank_name}")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered bank: {bank_name}")
         await update.message.reply_text(f"🏦 Вы указали банк: {bank_name}\n\n💳 Введите IBAN:")
         return self.ENTERING_CARD_DETAILS
 
@@ -290,7 +291,7 @@ class ExchangeHandler:
             return self.ENTERING_CARD_DETAILS
 
         context.user_data['card_info'] = card_info
-        logger.info(f"[Uid] ({user.id}) - Entered IBAN: {card_info}")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered IBAN: {card_info}")
         await update.message.reply_text(f"💳 Вы указали IBAN: {card_info}\n\n🔢 Теперь введите номер карты:")
         return self.ENTERING_CARD_NUMBER
 
@@ -302,7 +303,7 @@ class ExchangeHandler:
             return self.ENTERING_CARD_NUMBER
 
         context.user_data['card_number'] = card_number
-        logger.info(f"[Uid] ({user.id}) - Entered card number: {card_number}")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered card number: {card_number}")
         await update.message.reply_text(f"🔢 Вы указали номер карты: {card_number}\n\n👤 Укажите ФИО:")
         return self.ENTERING_FIO_DETAILS
 
@@ -314,7 +315,7 @@ class ExchangeHandler:
             return self.ENTERING_FIO_DETAILS
 
         context.user_data['fio'] = fio
-        logger.info(f"[Uid] ({user.id}) - Entered full name: {fio}")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered full name: {fio}")
         await update.message.reply_text(f"👤 Вы указали ФИО: {fio}\n\n🆔 Пожалуйста, введите ІПН/ЄДРПОУ:")
         return self.ENTERING_INN_DETAILS
 
@@ -326,7 +327,7 @@ class ExchangeHandler:
             return self.ENTERING_INN_DETAILS
 
         context.user_data['inn'] = inn
-        logger.info(f"[Uid] ({user.id}) - Entered INN: {inn}")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered INN: {inn}")
         return await self._show_final_confirmation(update, context)
 
     async def _show_final_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False):
@@ -441,7 +442,7 @@ class ExchangeHandler:
         user = query.from_user
         request_data = self.bot.db.get_request_by_id(request_id)
         logger.info(
-            f"[Uid] ({user.id}) - Creating a standard exchange request (#{request_id}).")
+            f"[Uid] ({user.id}, {user.username}) - Creating a standard exchange request (#{request_id}).")
 
         user_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Я совершил(а) перевод",
@@ -536,7 +537,7 @@ class ExchangeHandler:
         await query.answer()
         user = query.from_user
         if query.data == 'send_transfer_trx':
-            logger.info(f"[Uid] ({user.id}) - Confirmed the TRX request (standard flow).")
+            logger.info(f"[Uid] ({user.id}, {user.username}) - Confirmed the TRX request (standard flow).")
             await query.edit_message_text(
                 "✅ Вы подтвердили запрос на TRX.\n\n📬 Пожалуйста, укажите ваш TRX-кошелек:",
                 parse_mode='Markdown'
@@ -554,7 +555,7 @@ class ExchangeHandler:
             await update.message.reply_text("Пожалуйста, введите корректный адрес.")
             return self.ENTERING_TRX_ADDRESS
 
-        logger.info(f"[Uid] ({user.id}) - Entered TRX address.")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Entered TRX address.")
         context.user_data['trx_address'] = trx_address
         ud = context.user_data
         trx_cost_usd = self.bot.config.trx_cost_usdt
@@ -641,7 +642,7 @@ class ExchangeHandler:
                 return ConversationHandler.END
 
             logger.info(
-                f"[Uid] ({user.id}) - Creating an exchange request with TRX (#{request_id}).")
+                f"[Uid] ({user.id}, {user.username}) - Creating an exchange request with TRX (#{request_id}).")
             msg = await query.edit_message_text(
                 f"🙏 Спасибо за заявку #{request_id}!\n\n"
                 "🏦 Ожидайте сообщения об успешном переводе TRX ✅",
@@ -664,7 +665,7 @@ class ExchangeHandler:
         request_id = int(query.data.split('_')[-1])
         user = query.from_user
         logger.info(
-            f"[Uid] ({user.id}) - Confirmed the transfer for request #{request_id}, requesting hash.")
+            f"[Uid] ({user.id}, {user.username}) - Confirmed the transfer for request #{request_id}, requesting hash.")
         context.user_data['request_id'] = request_id
         await query.edit_message_text(text="✍️ Пожалуйста, отправьте хэш вашей транзакции:")
         return self.ENTERING_HASH
@@ -675,7 +676,7 @@ class ExchangeHandler:
         user = update.effective_user
 
         logger.info(
-            f"[Uid] ({user.id}) - Provided hash for request #{request_id}.")
+            f"[Uid] ({user.id}, {user.username}) - Provided hash for request #{request_id}.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -962,7 +963,7 @@ class ExchangeHandler:
         await query.answer()
         request_id = int(query.data.split('_')[-1])
         user = query.from_user
-        logger.info(f"[Uid] ({user.id}) - Confirmed receipt of funds for request #{request_id}.")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Confirmed receipt of funds for request #{request_id}.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -1016,7 +1017,7 @@ class ExchangeHandler:
         await query.answer()
         request_id = int(query.data.split('_')[-1])
         user = query.from_user
-        logger.info(f"[Uid] ({user.id}) - User initiated cancellation for request #{request_id}.")
+        logger.info(f"[Uid] ({user.id}, {user.username}) - User initiated cancellation for request #{request_id}.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data or request_data['status'] in ['completed', 'declined']:

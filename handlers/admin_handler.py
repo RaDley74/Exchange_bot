@@ -169,7 +169,7 @@ class AdminPanelHandler:
 
         return self.ADMIN_MENU
 
-    async def _show_referral_menu(self, query: Update.callback_query):
+    async def _show_referral_menu(self, query: Update.callback_query):  # type: ignore
         """Displays the referral balance management menu."""
         keyboard = [
             [InlineKeyboardButton("➕ Добавить", callback_data='ref_add_balance')],
@@ -224,7 +224,7 @@ class AdminPanelHandler:
 
     async def _process_balance_change(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Processes the balance change, updates DB, and notifies parties."""
-        admin_user = update.effective_user
+        user = update.effective_user
         try:
             amount_str = update.message.text.strip().replace(',', '.')
             amount = float(amount_str)
@@ -249,7 +249,7 @@ class AdminPanelHandler:
         action_text = "Добавлено" if amount > 0 else "Списано"
 
         logger.info(
-            f"[Aid] ({admin_user.id}) manually changed ref balance for user {target_user_id} by {amount}. New balance: {new_balance}")
+            f"[Aid] ({user.id}, {user.username}) manually changed ref balance for user {target_user_id} by {amount}. New balance: {new_balance}")
         await update.message.reply_text(
             f"✅ Успешно!\n\n"
             f"👤 Пользователь: @{target_username}\n"
