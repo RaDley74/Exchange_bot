@@ -1057,13 +1057,24 @@ class ExchangeHandler:
                                   f"📇 ИНН: {sanitize(request_data.get('inn'))}```\n\n")
 
         referral_payout = request_data.get('referral_payout_amount', 0.0)
+        rate = request_data.get('exchange_rate')
         payout_info = f"💱 {request_data['amount_currency']} {request_data['currency']} → {request_data['amount_uah']:.2f} UAH\n\n"
+
         if referral_payout > 0:
-            payout_info = (
-                f"💱 Обмен: {request_data['amount_currency']} {request_data['currency']}\n"
-                f"🏆 Списано с реф. баланса: ${referral_payout:.2f}\n"
-                f"💸 **Итого к выплате: {request_data['amount_uah']:.2f} UAH**\n\n"
-            )
+            if rate and rate > 0:
+                uah_for_exchange = request_data['amount_currency'] * rate
+                usd_for_payout = request_data['amount_uah'] / rate
+                payout_info = (
+                    f"💱 Обмен: {request_data['amount_currency']} {request_data['currency']} → {uah_for_exchange:.2f} UAH\n"
+                    f"🏆 Списано с реф. баланса: ${referral_payout:.2f}\n"
+                    f"💸 **Итого к выплате: {request_data['amount_uah']:.2f} UAH → ${usd_for_payout:.2f}**\n\n"
+                )
+            else:  # Fallback
+                payout_info = (
+                    f"💱 Обмен: {request_data['amount_currency']} {request_data['currency']}\n"
+                    f"🏆 Списано с реф. баланса: ${referral_payout:.2f}\n"
+                    f"💸 **Итого к выплате: {request_data['amount_uah']:.2f} UAH**\n\n"
+                )
 
         base_text = (f"{title}\n\n"
                      f"{payout_info}"

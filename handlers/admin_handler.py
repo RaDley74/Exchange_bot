@@ -512,19 +512,27 @@ class AdminPanelHandler:
 
     def _format_application_info(self, app) -> str:
         referral_payout = app.get('referral_payout_amount', 0.0)
+        rate = app.get('exchange_rate')
         payout_info = ""
 
-        payout_info = f"<b>Сумма (UAH):</b> {app['amount_uah']:.2f}\n"
         if referral_payout > 0:
-            payout_info = (
-                f"<b>Сумма обмена (валюта):</b> {app['amount_currency']}\n"
-                f"<b>Списано с реф. баланса ($):</b> {referral_payout:.2f}\n"
-                f"<b>ИТОГО к выплате (UAH):</b> {app['amount_uah']:.2f}\n"
-            )
+            if rate and rate > 0:
+                uah_for_exchange = app['amount_currency'] * rate
+                usd_for_payout = app['amount_uah'] / rate
+                payout_info = (
+                    f"<b>Сумма обмена (валюта):</b> {app['amount_currency']} → {uah_for_exchange:.2f} UAH\n"
+                    f"<b>Списано с реф. баланса ($):</b> {referral_payout:.2f}\n"
+                    f"<b>ИТОГО к выплате (UAH):</b> {app['amount_uah']:.2f} → ${usd_for_payout:.2f}\n"
+                )
+            else:  # Fallback
+                payout_info = (
+                    f"<b>Сумма обмена (валюта):</b> {app['amount_currency']}\n"
+                    f"<b>Списано с реф. баланса ($):</b> {referral_payout:.2f}\n"
+                    f"<b>ИТОГО к выплате (UAH):</b> {app['amount_uah']:.2f}\n"
+                )
         else:
             payout_info = (
-                f"<b>Сумма (валюта):</b> {app['amount_currency']}\n"
-                f"<b>Сумма (UAH):</b> {app['amount_uah']:.2f}\n"
+                f"<b>Сумма:</b> {app['amount_currency']} {app['currency']} → {app['amount_uah']:.2f} UAH\n"
             )
 
         return (
