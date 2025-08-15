@@ -1,3 +1,4 @@
+
 # handlers/admin_handler.py
 
 import logging
@@ -208,6 +209,9 @@ class AdminPanelHandler:
         target_username = target_profile.get('username', 'N/A')
         current_balance = target_profile.get('referral_balance', 0.0)
 
+        completed_deals = self.bot.db.get_user_completed_request_count(target_user_id)
+        referral_count = self.bot.db.get_referral_count_by_referrer_id(target_user_id)
+
         context.user_data['target_user_id'] = target_user_id
         context.user_data['target_username'] = target_username
 
@@ -216,7 +220,9 @@ class AdminPanelHandler:
 
         await update.message.reply_text(
             f"✅ Пользователь @{target_username} (ID: `{target_user_id}`) найден.\n"
-            f"💰 Текущий баланс: ${current_balance:.2f}\n\n"
+            f"💰 Текущий баланс: ${current_balance:.2f}\n"
+            f"✅ Совершено сделок: {completed_deals}\n"
+            f"👥 Всего рефералов: {referral_count}\n\n"
             f"Введите сумму в USD для списания/добавления (например, 10.5):",
             parse_mode='Markdown'
         )
@@ -296,9 +302,14 @@ class AdminPanelHandler:
         target_username = target_profile.get('username', 'N/A')
         current_balance = target_profile.get('referral_balance', 0.0)
 
+        completed_deals = self.bot.db.get_user_completed_request_count(target_user_id)
+        referral_count = self.bot.db.get_referral_count_by_referrer_id(target_user_id)
+
         await update.message.reply_text(
             f"✅ Пользователь @{target_username} (ID: `{target_user_id}`)\n"
-            f"💰 Реферальный баланс: **${current_balance:.2f}**",
+            f"💰 Реферальный баланс: **${current_balance:.2f}**\n"
+            f"✅ Совершено сделок: **{completed_deals}**\n"
+            f"👥 Всего рефералов: **{referral_count}**",
             parse_mode='Markdown'
         )
         return await self._show_main_menu(update, context)
@@ -503,7 +514,7 @@ class AdminPanelHandler:
         if all_applications:
             await update.message.reply_text(f"✅ Найдены активные заявки ({len(all_applications)} шт.):")
             for app in all_applications:
-                response_text = self._format_application_info(app)
+                response_text = self._format_application_info(dict(app))
                 await update.message.reply_text(response_text, parse_mode='HTML')
         else:
             await update.message.reply_text("❌ Активных заявок для данного пользователя не найдено.")

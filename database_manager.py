@@ -1,3 +1,5 @@
+
+
 # database_manager.py
 
 import sqlite3
@@ -372,6 +374,14 @@ class DatabaseManager:
             total_pages = (total_count + page_size - 1) // page_size
 
         return referrals_on_page, total_pages
+
+    def get_referral_count_by_referrer_id(self, referrer_id: int) -> int:
+        """Counts the total number of referrals for a given referrer."""
+        query = "SELECT COUNT(*) FROM referrals WHERE referrer_id = ?"
+        cursor = self._conn.cursor()
+        cursor.execute(query, (referrer_id,))
+        result = cursor.fetchone()
+        return result[0] if result else 0
 
     def update_referral_balance(self, user_id: int, amount_to_add: float):
         """Updates a user's referral balance."""
