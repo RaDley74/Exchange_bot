@@ -158,6 +158,32 @@ class ReferralHandler:
         except Exception as e:
             logger.error(f"Failed to send bonus notification to referrer {referrer_id}: {e}")
 
+        # Notify admin about the credited bonus
+        try:
+            admin_ids = self.bot.config.admin_ids
+            if not admin_ids:
+                return
+
+            referrer_profile = self.bot.db.get_user_profile(referrer_id)
+            referrer_username = referrer_profile.get(
+                'username') if referrer_profile else f"ID: {referrer_id}"
+            referrer_display = f"@{referrer_username}" if referrer_username != f"ID: {referrer_id}" else f"пользователь (ID: {referrer_id})"
+
+            admin_message = f"💰 Пользователь {referrer_display} получил ${self.REFERRAL_BONUS:.2f}, так как его реферал {referred_user_display} выполнил первую сделку."
+
+            for admin_id in admin_ids:
+                try:
+                    await self.bot.application.bot.send_message(
+                        chat_id=admin_id,
+                        text=admin_message
+                    )
+                except Exception as e_inner:
+                    logger.error(
+                        f"Failed to send referral bonus notification to admin {admin_id}: {e_inner}")
+        except Exception as e:
+            logger.error(
+                f"An error occurred while trying to notify admins about a referral bonus: {e}")
+
     async def back_to_main_menu_from_referral(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Returns the user to the main menu and ends the conversation."""
         await self.bot.exchange_handler.main_menu(update, context)
