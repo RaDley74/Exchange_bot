@@ -21,8 +21,8 @@ class ExchangeHandler:
         ENTERING_CARD_NUMBER, ENTERING_FIO_DETAILS, ENTERING_INN_DETAILS, CONFIRMING_EXCHANGE,
         CONFIRMING_EXCHANGE_TRX, ENTERING_TRX_ADDRESS, FINAL_CONFIRMING_EXCHANGE_TRX,
         ENTERING_HASH, SELECTING_CANCELLATION_TYPE, AWAITING_REASON_TEXT,
-        ASK_USE_REFERRAL_BALANCE, ASK_PAY_TRX_FROM_REFERRAL,
-    ) = range(17)
+        ASK_USE_REFERRAL_BALANCE, ASK_PAY_TRX_FROM_REFERRAL, AWAITING_REVIEW_TEXT
+    ) = range(18)
 
     def __init__(self, bot_instance):
         self.bot = bot_instance
@@ -263,7 +263,8 @@ class ExchangeHandler:
         if query.data == 'profile_yes':
             profile_data = self.bot.db.get_user_profile(user.id)
             context.user_data.update(profile_data)
-            logger.info(f"[Uid] ({user.id}, {user.username}) - Chose to use saved profile requisites.")
+            logger.info(
+                f"[Uid] ({user.id}, {user.username}) - Chose to use saved profile requisites.")
             return await self._show_final_confirmation(update, context, is_callback=True)
 
         elif query.data == 'profile_no':
@@ -516,6 +517,10 @@ class ExchangeHandler:
             user_text = f"✅ Перевод средств по заявке #{request_id} вам выполнен успешно. 💸\n\n" \
                 "🙏 Спасибо за использование нашего сервиса! 🤝\n\n" \
                 "✅ Вы подтвердили получение."
+            user_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✍️ Оставить отзыв",
+                                      callback_data=f"leave_review_{request_id}")]
+            ])
 
         if user_text:
             try:
@@ -537,7 +542,8 @@ class ExchangeHandler:
         await query.answer()
         user = query.from_user
         if query.data == 'send_transfer_trx':
-            logger.info(f"[Uid] ({user.id}, {user.username}) - Confirmed the TRX request (standard flow).")
+            logger.info(
+                f"[Uid] ({user.id}, {user.username}) - Confirmed the TRX request (standard flow).")
             await query.edit_message_text(
                 "✅ Вы подтвердили запрос на TRX.\n\n📬 Пожалуйста, укажите ваш TRX-кошелек:",
                 parse_mode='Markdown'
@@ -963,7 +969,8 @@ class ExchangeHandler:
         await query.answer()
         request_id = int(query.data.split('_')[-1])
         user = query.from_user
-        logger.info(f"[Uid] ({user.id}, {user.username}) - Confirmed receipt of funds for request #{request_id}.")
+        logger.info(
+            f"[Uid] ({user.id}, {user.username}) - Confirmed receipt of funds for request #{request_id}.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data:
@@ -976,11 +983,16 @@ class ExchangeHandler:
         updated_text, _ = self._generate_admin_message_content(
             self.bot.db.get_request_by_id(request_id))
         await self._update_admin_messages(request_id, updated_text, None)
+
+        review_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✍️ Оставить отзыв", callback_data=f"leave_review_{request_id}")]
+        ])
+
         await query.edit_message_text(
             text=f"✅ Перевод средств по заявке #{request_id} вам выполнен успешно. 💸\n\n"
             "🙏 Спасибо за использование нашего сервиса! 🤝\n\n"
             "✅ Вы подтвердили получение.",
-            reply_markup=None, parse_mode='Markdown'
+            reply_markup=review_keyboard, parse_mode='Markdown'
         )
 
     async def refund_referral_debit_for_request(self, request_id: int):
@@ -1017,7 +1029,8 @@ class ExchangeHandler:
         await query.answer()
         request_id = int(query.data.split('_')[-1])
         user = query.from_user
-        logger.info(f"[Uid] ({user.id}, {user.username}) - User initiated cancellation for request #{request_id}.")
+        logger.info(
+            f"[Uid] ({user.id}, {user.username}) - User initiated cancellation for request #{request_id}.")
 
         request_data = self.bot.db.get_request_by_id(request_id)
         if not request_data or request_data['status'] in ['completed', 'declined']:
@@ -1198,6 +1211,67 @@ class ExchangeHandler:
         self.bot.db.update_request_data(
             request_id, {'admin_message_ids': json.dumps(new_admin_message_ids)})
 
+    async def prompt_for_review(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Asks the user to enter their review text."""
+        query = update.callback_query
+        await query.answer()
+        user = query.from_user
+        logger.info(f"[Uid] ({user.id}, {user.username}) - Chose to leave a review.")
+        context.user_data['username_for_review'] = user.username or f"ID: {user.id}"
+        await query.edit_message_text("✍️ Пожалуйста, введите текст вашего отзыва:")
+        return self.AWAITING_REVIEW_TEXT
+
+    async def process_review(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Processes the review, sends it to the channel, and thanks the user."""
+        user = update.effective_user
+        review_text = update.message.text
+        username = context.user_data.pop('username_for_review', user.username or f"ID: {user.id}")
+
+        logger.info(f"[Uid] ({user.id}, {username}) - Submitted a review.")
+
+        channel_id = self.bot.config.review_channel_id
+
+        if channel_id:
+            channel_message = (
+                f"Пользователь: @{username}\n"
+                f"Отзыв: {review_text}"
+            )
+
+            try:
+                await context.bot.send_message(
+                    chat_id=channel_id,
+                    text=channel_message
+                )
+                logger.info(
+                    f"Successfully sent review from user {username} to channel {channel_id}.")
+            except Exception as e:
+                logger.error(f"Failed to send review to channel {channel_id}: {e}")
+                # Optionally notify admins that sending failed
+                for admin_id in self.bot.config.admin_ids:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=admin_id,
+                            text=f"⚠️ Не удалось отправить отзыв в канал.\n\n{channel_message}"
+                        )
+                    except Exception as admin_e:
+                        logger.error(
+                            f"Failed to even notify admin {admin_id} about the review failure: {admin_e}")
+        else:
+            logger.warning(
+                "Review was submitted but REVIEW_CHANNEL_ID is not configured. The review was not sent.")
+            # Notify admin that the channel ID is missing
+            for admin_id in self.bot.config.admin_ids:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text="⚠️ Пользователь оставил отзыв, но ID канала для отзывов (REVIEW_CHANNEL_ID) не настроен в settings.ini."
+                    )
+                except Exception:
+                    pass
+
+        await update.message.reply_text("Спасибо за оставленный вами отзыв!")
+        return ConversationHandler.END
+
     def setup_handlers(self, application):
         exchange_conv_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(self.start_exchange_convo, pattern='^exchange$')],
@@ -1251,9 +1325,20 @@ class ExchangeHandler:
             conversation_timeout=300
         )
 
+        review_conv_handler = ConversationHandler(
+            entry_points=[CallbackQueryHandler(self.prompt_for_review, pattern=r'^leave_review_')],
+            states={
+                self.AWAITING_REVIEW_TEXT: [MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, self.process_review)]
+            },
+            fallbacks=[CommandHandler('start', self.cancel_and_return_to_menu)],
+            conversation_timeout=300
+        )
+
         application.add_handler(exchange_conv_handler)
         application.add_handler(hash_conv_handler)
         application.add_handler(cancellation_conv_handler)
+        application.add_handler(review_conv_handler)
 
         application.add_handler(CallbackQueryHandler(self.show_rate, pattern='^rate$'))
         application.add_handler(CallbackQueryHandler(self.show_help, pattern='^user_help$'))
