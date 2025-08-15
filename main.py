@@ -17,7 +17,7 @@ os.makedirs("database", exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)-25s - %(levelname)-8s - %(message)s',
+    format='%(asctime)s - %(name)-29s - %(levelname)-8s - %(message)s',
     handlers=[
         logging.FileHandler("log/bot.log", encoding='utf-8'),
         logging.StreamHandler(sys.stdout)

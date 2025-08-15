@@ -29,10 +29,15 @@ class UserCabinetHandler:
     def _format_profile_info(self, profile_data: dict, user_id, username) -> str:
         """Formats user profile data for display in a message."""
         referral_balance = profile_data.get('referral_balance', 0.0) if profile_data else 0.0
+
+        # Fetch completed requests count
+        completed_requests_count = self.bot.db.get_user_completed_request_count(user_id)
+
         header = (
             f"<b>👤 Профиль:</b> @{username or 'N/A'}\n"
             f"<b>🆔 ID:</b> <code>{user_id}</code>\n"
-            f"<b>💰 Реферальный баланс:</b> ${referral_balance:.2f}\n\n"
+            f"<b>💰 Реферальный баланс:</b> ${referral_balance:.2f}\n"
+            f"<b>✅ Выполнено сделок:</b> {completed_requests_count}\n\n"  # Added this line
         )
 
         if not profile_data or not any([profile_data.get(key) for key in ['bank_name', 'card_info', 'card_number', 'fio', 'inn']]):
