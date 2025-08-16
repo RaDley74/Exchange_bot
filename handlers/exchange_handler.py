@@ -1,5 +1,3 @@
-# handlers/exchange_handler.py
-
 import logging
 import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -33,6 +31,7 @@ class ExchangeHandler:
             [
                 InlineKeyboardButton("➸ Обменять", callback_data='exchange'),
                 InlineKeyboardButton("📉 Курс", callback_data='rate'),
+                InlineKeyboardButton("📝 Отзывы", url=self.bot.config.review_channel_url)
             ],
             [
                 InlineKeyboardButton("🔐 Личный кабинет", callback_data='user_cabinet'),
@@ -43,18 +42,19 @@ class ExchangeHandler:
             ]
         ]
         text = (
-            "👋 Привет! Добро пожаловать в SafePay Bot 💱\n\n"
-            "🧲 Обмен быстрый и удобный.\n\n"
-            "🌟 Выбери раздел:"
+            "👋 **Привет!**\n"
+            "Добро пожаловать в **SafePay Bot** 🤝\n\n"
+            "⚡ _Обмен — быстро, удобно и безопасно_ 🔒\n\n"
+            "📂 **Выбери раздел ниже** ⬇️"
         )
 
         query = update.callback_query
         if query:
             await query.answer()
             if query.message:
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         elif update.message:
-            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE, called_from_referral: bool = False):
         """

@@ -45,8 +45,8 @@ class UserCabinetHandler:
 
         body = (
             "<b>🗂️ Ваши сохраненные реквизиты:</b>\n\n"
-            f"<b>👤 ФИО:</b> {profile_data.get('fio') or 'Не указано'}\n"
-            f"<b>🏦 Банк:</b> {profile_data.get('bank_name') or 'Не указан'}\n"
+            f"<b>👤 ФИО:</b> <code>{profile_data.get('fio') or 'Не указано'}</code>\n"
+            f"<b>🏦 Банк:</b> <code>{profile_data.get('bank_name') or 'Не указан'}</code>\n"
             f"<b>💳 IBAN:</b> <code>{profile_data.get('card_info') or 'Не указан'}</code>\n"
             f"<b>🔢 Номер карты:</b> <code>{profile_data.get('card_number') or 'Не указан'}</code>\n"
             f"<b>🆔 ІПН/ЄДРПОУ:</b> <code>{profile_data.get('inn') or 'Не указан'}</code>"

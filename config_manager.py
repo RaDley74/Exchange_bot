@@ -32,7 +32,8 @@ class ConfigManager:
                 'SUPPORT_CONTACT': 'your_support_contact_here',
                 'TRX_COST_USDT': '15.0',
                 'BOT_ENABLED': 'True',
-                'REVIEW_CHANNEL_ID': 'your_channel_id_here'
+                'REVIEW_CHANNEL_ID': 'your_channel_id_here',
+                'REVIEW_CHANNEL_URL': 'your_channel_url_here'
             }
         }
 
@@ -199,3 +200,13 @@ class ConfigManager:
             logger.error(
                 f"[System] - Invalid REVIEW_CHANNEL_ID '{channel_id_str}'. It must be a valid integer. Review functionality will be disabled.")
             return None
+
+    @property
+    def review_channel_url(self) -> str | None:
+        """Returns the URL of the review channel, or None if not set or invalid."""
+        channel_url = self.get('Settings', 'REVIEW_CHANNEL_URL', '')
+        if not channel_url or 'your_channel_url_here' in channel_url:
+            logger.warning(
+                "[System] - REVIEW_CHANNEL_URL is not set in settings.ini. The reviews button will not be displayed.")
+            return None
+        return channel_url
