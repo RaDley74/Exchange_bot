@@ -182,7 +182,7 @@ class ExchangeHandler:
         profile_data = self.bot.db.get_user_profile(user.id)
         referral_balance = profile_data.get('referral_balance', 0.0) if profile_data else 0.0
 
-        if referral_balance > 0:
+        if referral_balance >= self.bot.config.min_referral_payout:
             context.user_data['referral_balance'] = referral_balance
             keyboard = [
                 [InlineKeyboardButton("✅ Да, добавить к обмену", callback_data='ref_payout_yes')],
@@ -349,7 +349,7 @@ class ExchangeHandler:
             f"👤 ФИО: `{ud.get('fio', 'Не указано')}`\n"
             f"💳 IBAN: `{ud.get('card_info', 'Не указан')}`\n"
             f"🔢 Номер карты: `{ud.get('card_number', 'Не указан')}`\n"
-            f"🆔 ІПН/ЄДРПОУ: `{ud.get('inn', 'Не указан')}`\n\n"
+            f"🆔 ІПН/ЄДРПОУ: `{ud.get('inn', 'Не указано')}`\n\n"
         )
 
         text = main_exchange_text + referral_text + total_text + details_text + \

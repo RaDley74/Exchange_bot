@@ -33,7 +33,8 @@ class ConfigManager:
                 'TRX_COST_USDT': '15.0',
                 'BOT_ENABLED': 'True',
                 'REVIEW_CHANNEL_ID': 'your_channel_id_here',
-                'REVIEW_CHANNEL_URL': 'your_channel_url_here'
+                'REVIEW_CHANNEL_URL': 'your_channel_url_here',
+                'MIN_REFERRAL_PAYOUT_USD': '20.0'
             }
         }
 
@@ -175,6 +176,10 @@ class ConfigManager:
     @property
     def trx_cost_usdt(self) -> float:
         return float(self.get('Settings', 'TRX_COST_USDT', '15.0'))
+
+    @property
+    def min_referral_payout(self) -> float:
+        return float(self.get('Settings', 'MIN_REFERRAL_PAYOUT_USD', '20.0'))
 
     @property
     def bot_enabled(self) -> bool:
