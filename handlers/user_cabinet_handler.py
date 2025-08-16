@@ -1,5 +1,3 @@
-# handlers/user_cabinet_handler.py
-
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -29,6 +27,14 @@ class UserCabinetHandler:
     def _format_profile_info(self, profile_data: dict, user_id, username) -> str:
         """Formats user profile data for display in a message."""
         referral_balance = profile_data.get('referral_balance', 0.0) if profile_data else 0.0
+        vip_status = profile_data.get('vip_status') if profile_data else None
+
+        # Format VIP status
+        vip_status_text = ""
+        if vip_status == 'Gold':
+            vip_status_text = "<b>💎 Статус:</b> Gold\n"
+        elif vip_status == 'Silver':
+            vip_status_text = "<b>⚪️ Статус:</b> Silver\n"
 
         # Fetch completed requests count
         completed_requests_count = self.bot.db.get_user_completed_request_count(user_id)
@@ -36,8 +42,9 @@ class UserCabinetHandler:
         header = (
             f"<b>👤 Профиль:</b> @{username or 'N/A'}\n"
             f"<b>🆔 ID:</b> <code>{user_id}</code>\n"
+            f"{vip_status_text}"
             f"<b>💰 Реферальный баланс:</b> ${referral_balance:.2f}\n"
-            f"<b>✅ Выполнено сделок:</b> {completed_requests_count}\n\n"  # Added this line
+            f"<b>✅ Выполнено сделок:</b> {completed_requests_count}\n\n"
         )
 
         if not profile_data or not any([profile_data.get(key) for key in ['bank_name', 'card_info', 'card_number', 'fio', 'inn']]):

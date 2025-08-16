@@ -1,4 +1,3 @@
-
 # handlers/admin_handler.py
 
 import logging
@@ -31,8 +30,10 @@ class AdminPanelHandler:
         REFERRAL_MENU,
         AWAIT_USER_FOR_REF_ACTION,
         AWAIT_AMOUNT_FOR_REF_ACTION,
-        AWAIT_USER_FOR_REF_CHECK
-    ) = range(15)
+        AWAIT_USER_FOR_REF_CHECK,
+        AWAIT_USER_FOR_VIP,
+        SELECT_VIP_STATUS
+    ) = range(17)
 
     WORKFLOW_STATUSES = [
         'new',
@@ -102,6 +103,7 @@ class AdminPanelHandler:
                 InlineKeyboardButton("🔧 Изменить статус", callback_data='change_status'),
                 InlineKeyboardButton("🏆 Рефералка", callback_data='admin_referral_menu')
             ],
+            [InlineKeyboardButton("👑 Управление VIP", callback_data='admin_manage_vip')],
             [toggle_button],
         ]
         text = "⚙️ Админ-панель"
@@ -167,6 +169,9 @@ class AdminPanelHandler:
             return self.AWAIT_REQUEST_ID_FOR_STATUS_CHANGE
         elif data == 'toggle_bot_status':
             return await self.toggle_bot_status(update, context)
+        elif data == 'admin_manage_vip':
+            await query.edit_message_text("Введите ID или юзернейм пользователя для управления VIP-статусом:")
+            return self.AWAIT_USER_FOR_VIP
 
         return self.ADMIN_MENU
 
@@ -312,6 +317,96 @@ class AdminPanelHandler:
             f"👥 Всего рефералов: **{referral_count}**",
             parse_mode='Markdown'
         )
+        return await self._show_main_menu(update, context)
+
+    async def _ask_for_vip_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Finds the user and shows VIP status options."""
+        user_input = update.message.text.strip()
+        admin_user = update.effective_user
+
+        target_profile = self.bot.db.get_profile_by_id_or_login(user_input)
+
+        if not target_profile:
+            await update.message.reply_text("❌ Пользователь не найден. Попробуйте снова или вернитесь в меню /a.")
+            return self.AWAIT_USER_FOR_VIP
+
+        target_user_id = target_profile['user_id']
+        target_username = target_profile.get('username', 'N/A')
+        current_status = target_profile.get('vip_status') or 'Отсутствует'
+
+        context.user_data['target_user_id_vip'] = target_user_id
+        context.user_data['target_username_vip'] = target_username
+
+        keyboard = [
+            [InlineKeyboardButton("💎 Gold", callback_data='set_vip_Gold')],
+            [InlineKeyboardButton("⚪️ Silver", callback_data='set_vip_Silver')],
+            [InlineKeyboardButton("❌ Убрать статус", callback_data='set_vip_None')],
+            [InlineKeyboardButton("⬅️ Назад", callback_data='admin_back_menu')]
+        ]
+
+        await update.message.reply_text(
+            f"✅ Пользователь @{target_username} (ID: `{target_user_id}`) найден.\n"
+            f"👑 Текущий статус: **{current_status}**\n\n"
+            f"Выберите новый статус:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        return self.SELECT_VIP_STATUS
+
+    async def _process_vip_status_change(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Processes the VIP status change, updates DB, and notifies parties."""
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        admin_user = query.from_user
+
+        if data == 'admin_back_menu':
+            await query.delete_message()
+            return await self._show_main_menu(update, context)
+
+        target_user_id = context.user_data.get('target_user_id_vip')
+        target_username = context.user_data.get('target_username_vip')
+        if not target_user_id:
+            await query.edit_message_text("❌ Произошла ошибка сессии. Пожалуйста, начните сначала.")
+            return await self._show_main_menu(update, context)
+
+        new_status_str = data.replace('set_vip_', '')
+        new_status = None if new_status_str == 'None' else new_status_str
+
+        # Update the database
+        self.bot.db.create_or_update_user_profile(target_user_id, {'vip_status': new_status})
+
+        display_status = new_status if new_status else "Отсутствует"
+
+        logger.info(
+            f"[Aid] ({admin_user.id}, {admin_user.username}) changed VIP status for user {target_user_id} to '{display_status}'.")
+
+        await query.edit_message_text(
+            f"✅ Успешно!\n\n"
+            f"👤 Пользователь: @{target_username}\n"
+            f"👑 Новый статус: **{display_status}**",
+            parse_mode='Markdown'
+        )
+
+        # Notify the user
+        try:
+            notification_text = ""
+            if new_status == 'Gold':
+                notification_text = "🎉 Поздравляем! Вам присвоен VIP-статус: 💎 **Gold**."
+            elif new_status == 'Silver':
+                notification_text = "🎉 Поздравляем! Вам присвоен VIP-статус: ⚪️ **Silver**."
+            else:
+                notification_text = "ℹ️ Ваш VIP-статус был снят."
+
+            await self.bot.application.bot.send_message(
+                chat_id=target_user_id,
+                text=notification_text,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Failed to send VIP status notification to user {target_user_id}: {e}")
+            await query.message.reply_text(f"⚠️ Не удалось отправить уведомление пользователю @{target_username}.")
+
         return await self._show_main_menu(update, context)
 
     async def show_status_selection_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -655,6 +750,8 @@ class AdminPanelHandler:
                 self.AWAIT_USER_FOR_REF_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self._ask_for_amount)],
                 self.AWAIT_AMOUNT_FOR_REF_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self._process_balance_change)],
                 self.AWAIT_USER_FOR_REF_CHECK: [MessageHandler(filters.TEXT & ~filters.COMMAND, self._check_user_balance)],
+                self.AWAIT_USER_FOR_VIP: [MessageHandler(filters.TEXT & ~filters.COMMAND, self._ask_for_vip_status)],
+                self.SELECT_VIP_STATUS: [CallbackQueryHandler(self._process_vip_status_change, pattern='^set_vip_|admin_back_menu$')],
             },
             fallbacks=[CommandHandler('a', self.start), CommandHandler('ac', self.close)]
         )

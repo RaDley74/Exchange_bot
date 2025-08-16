@@ -1,5 +1,3 @@
-
-
 # database_manager.py
 
 import sqlite3
@@ -49,6 +47,7 @@ class DatabaseManager:
             'fio': 'TEXT',
             'inn': 'TEXT',
             'referral_balance': 'REAL DEFAULT 0.0',
+            'vip_status': 'TEXT DEFAULT NULL',
             'updated_at': 'TIMESTAMP'
         },
         'referrals': {
@@ -213,7 +212,8 @@ class DatabaseManager:
         """
         Creates a new user profile or updates an existing one with new data.
         """
-        update_data = {k: v for k, v in profile_data.items() if v is not None}
+        # update_data = {k: v for k, v in profile_data.items() if v is not None}
+        update_data = profile_data
         if not update_data:
             return
 

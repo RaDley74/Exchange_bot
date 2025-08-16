@@ -27,6 +27,17 @@ class ExchangeHandler:
 
     async def main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Sends or edits a message to show the main menu."""
+        user = update.effective_user
+        profile_data = self.bot.db.get_user_profile(user.id)
+        vip_status = profile_data.get('vip_status') if profile_data else None
+
+        # Format VIP status
+        vip_status_text = ""
+        if vip_status == 'Gold':
+            vip_status_text = "\n\n👑 **Ваш статус:** 💎 Gold"
+        elif vip_status == 'Silver':
+            vip_status_text = "\n\n👑 **Ваш статус:** ⚪️ Silver"
+
         keyboard = [
             [
                 InlineKeyboardButton("➸ Обменять", callback_data='exchange'),
@@ -43,7 +54,7 @@ class ExchangeHandler:
         ]
         text = (
             "👋 **Привет!**\n"
-            "Добро пожаловать в **SafePay Bot** 🤝\n\n"
+            f"Добро пожаловать в **SafePay Bot** 🤝{vip_status_text}\n\n"
             "⚡ _Обмен — быстро, удобно и безопасно_ 🔒\n\n"
             "📂 **Выбери раздел ниже** ⬇️"
         )
@@ -1056,6 +1067,16 @@ class ExchangeHandler:
 
         def sanitize(text): return str(text).replace('`', "'") if text else ""
 
+        # Fetch user profile to get VIP status
+        user_profile = self.bot.db.get_user_profile(request_data['user_id'])
+        vip_status = user_profile.get('vip_status') if user_profile else None
+
+        vip_status_text = ""
+        if vip_status == 'Gold':
+            vip_status_text = "👑 VIP-статус: 💎 Gold\n"
+        elif vip_status == 'Silver':
+            vip_status_text = "👑 VIP-статус: ⚪️ Silver\n"
+
         status_text = self.translate_status(request_data['status'])
         rate_info = f"(Курс: {request_data['exchange_rate']})" if request_data.get(
             'exchange_rate') else ""
@@ -1063,7 +1084,8 @@ class ExchangeHandler:
 
         user_info_block = (f"👤 Пользователь:\n"
                            f"🆔 ID: `{request_data['user_id']}`\n"
-                           f"📛 Юзернейм: @{username_display}\n\n")
+                           f"📛 Юзернейм: @{username_display}\n"
+                           f"{vip_status_text}\n")
 
         transfer_details_block = (f"```Реквизиты:\n"
                                   f"🏦 Банк: {sanitize(request_data.get('bank_name'))}\n"
