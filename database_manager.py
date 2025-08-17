@@ -1,3 +1,5 @@
+
+
 # database_manager.py
 
 import sqlite3
@@ -292,6 +294,54 @@ class DatabaseManager:
         cursor = self._conn.cursor()
         cursor.execute(query, params)
         return cursor.fetchall()
+
+    def get_all_requests(self, page: int = 1, page_size: int = 10) -> tuple[list, int]:
+        """
+        Gets a paginated list of all exchange requests, sorted by creation date.
+        Returns a tuple: (list of requests on the current page, total number of pages).
+        """
+        cursor = self._conn.cursor()
+        offset = (page - 1) * page_size
+
+        list_query = "SELECT * FROM exchange_requests ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        cursor.execute(list_query, (page_size, offset))
+        requests_on_page = [dict(row) for row in cursor.fetchall()]
+
+        count_query = "SELECT COUNT(*) FROM exchange_requests"
+        cursor.execute(count_query)
+        total_count = cursor.fetchone()[0]
+
+        if total_count == 0:
+            total_pages = 1
+        else:
+            total_pages = (total_count + page_size - 1) // page_size
+
+        return requests_on_page, total_pages
+    
+    # --- НОВЫЙ МЕТОД ---
+    def get_active_requests(self, page: int = 1, page_size: int = 10) -> tuple[list, int]:
+        """
+        Gets a paginated list of active (non-terminal) exchange requests.
+        Returns a tuple: (list of requests on the current page, total number of pages).
+        """
+        cursor = self._conn.cursor()
+        offset = (page - 1) * page_size
+
+        list_query = "SELECT * FROM exchange_requests WHERE status NOT IN ('completed', 'declined') ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        cursor.execute(list_query, (page_size, offset))
+        requests_on_page = [dict(row) for row in cursor.fetchall()]
+
+        count_query = "SELECT COUNT(*) FROM exchange_requests WHERE status NOT IN ('completed', 'declined')"
+        cursor.execute(count_query)
+        total_count = cursor.fetchone()[0]
+
+        if total_count == 0:
+            total_pages = 1
+        else:
+            total_pages = (total_count + page_size - 1) // page_size
+
+        return requests_on_page, total_pages
+    # --- КОНЕЦ НОВОГО МЕТОДА ---
 
     def update_request_status(self, request_id, status):
         """Updates the status of a request."""

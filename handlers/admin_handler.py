@@ -1,3 +1,5 @@
+
+
 # handlers/admin_handler.py
 
 import logging
@@ -32,8 +34,10 @@ class AdminPanelHandler:
         AWAIT_AMOUNT_FOR_REF_ACTION,
         AWAIT_USER_FOR_REF_CHECK,
         AWAIT_USER_FOR_VIP,
-        SELECT_VIP_STATUS
-    ) = range(17)
+        SELECT_VIP_STATUS,
+        VIEW_ALL_REQUESTS,
+        VIEW_ACTIVE_REQUESTS  # --- НОВОЕ СОСТОЯНИЕ ---
+    ) = range(19)
 
     WORKFLOW_STATUSES = [
         'new',
@@ -95,16 +99,24 @@ class AdminPanelHandler:
                 InlineKeyboardButton("📊 Информация", callback_data='admin_info'),
                 InlineKeyboardButton("⚙️ Настройки", callback_data='admin_settings'),
             ],
+            # --- ИЗМЕНЕНИЯ ---
+            [
+                InlineKeyboardButton("📂 Все заявки", callback_data='view_all_requests'),
+                InlineKeyboardButton("⏳ Активные заявки", callback_data='view_active_requests'),
+            ],
             [
                 InlineKeyboardButton("🔍 Найти заявки", callback_data='find_user_applications'),
-                InlineKeyboardButton("🔄 Восстановить", callback_data='restore_application'),
+                InlineKeyboardButton("🔧 Изменить статус", callback_data='change_status'),
             ],
             [
-                InlineKeyboardButton("🔧 Изменить статус", callback_data='change_status'),
-                InlineKeyboardButton("🏆 Рефералка", callback_data='admin_referral_menu')
+                InlineKeyboardButton("🏆 Рефералка", callback_data='admin_referral_menu'),
+                InlineKeyboardButton("👑 Управление VIP", callback_data='admin_manage_vip')
             ],
-            [InlineKeyboardButton("👑 Управление VIP", callback_data='admin_manage_vip')],
-            [toggle_button],
+            [
+                InlineKeyboardButton("🔄 Восстановить чат", callback_data='restore_application'),
+                toggle_button
+            ],
+            # --- КОНЕЦ ИЗМЕНЕНИЙ ---
         ]
         text = "⚙️ Админ-панель"
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -162,18 +174,212 @@ class AdminPanelHandler:
             await query.edit_message_text("Введите ID аккаунта или login телеграм для поиска активных заявок:")
             return self.AWAIT_USER_FOR_APPS
         elif data == 'restore_application':
-            await query.edit_message_text("Введите ID заявки, которую нужно восстановить:")
+            await query.edit_message_text("Введите ID заявки, которую нужно восстановить (чат с юзером и админами):")
             return self.AWAIT_REQUEST_ID_FOR_RESTORE
         elif data == 'change_status':
             await query.edit_message_text("Введите ID заявки для изменения статуса:")
             return self.AWAIT_REQUEST_ID_FOR_STATUS_CHANGE
         elif data == 'toggle_bot_status':
             return await self.toggle_bot_status(update, context)
+        elif data == 'view_all_requests':
+            return await self._show_all_requests_list(update, context)
+        # --- НОВЫЙ ОБРАБОТЧИК ---
+        elif data == 'view_active_requests':
+            return await self._show_active_requests_list(update, context)
+        # --- КОНЕЦ ---
         elif data == 'admin_manage_vip':
             await query.edit_message_text("Введите ID или юзернейм пользователя для управления VIP-статусом:")
             return self.AWAIT_USER_FOR_VIP
 
         return self.ADMIN_MENU
+
+    async def _show_all_requests_list(self, update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 1):
+        """Displays a paginated list of all exchange requests."""
+        query = update.callback_query
+        if query:
+            await query.answer()
+
+        requests, total_pages = self.bot.db.get_all_requests(page=page, page_size=10)
+
+        text = "📑 **Список всех заявок:**\n\n"
+        keyboard_buttons = []
+
+        if not requests:
+            text += "Заявок пока нет."
+        else:
+            for req in requests:
+                status_icon = "✅" if req['status'] == 'completed' else "❌" if req['status'] == 'declined' else "⏳"
+                summary = f"{status_icon} ID: {req['id']} | @{req['username']} | {self.bot.exchange_handler.translate_status(req['status'])}"
+                keyboard_buttons.append([InlineKeyboardButton(
+                    summary, callback_data=f'view_req_details_{req["id"]}_{page}')])
+
+        pagination_row = []
+        if page > 1:
+            pagination_row.append(InlineKeyboardButton("⬅️", callback_data=f'req_page_{page - 1}'))
+        if total_pages > 1:
+            pagination_row.append(InlineKeyboardButton(
+                f"{page}/{total_pages}", callback_data='ignore_page'))
+        if page < total_pages:
+            pagination_row.append(InlineKeyboardButton("➡️", callback_data=f'req_page_{page + 1}'))
+
+        if pagination_row:
+            keyboard_buttons.append(pagination_row)
+
+        keyboard_buttons.append([InlineKeyboardButton(
+            "⬅️ Назад в меню", callback_data='admin_back_menu')])
+        reply_markup = InlineKeyboardMarkup(keyboard_buttons)
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        return self.VIEW_ALL_REQUESTS
+
+    async def _handle_requests_page_navigation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handles page navigation for the list of all requests."""
+        query = update.callback_query
+        if 'ignore' in query.data:
+            await query.answer()
+            return self.VIEW_ALL_REQUESTS
+
+        page = int(query.data.split('_')[-1])
+        return await self._show_all_requests_list(update, context, page=page)
+
+    async def _show_request_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Displays the full details of a selected request from the 'all' list."""
+        query = update.callback_query
+        await query.answer()
+
+        parts = query.data.split('_')
+        request_id = int(parts[-2])
+        page = int(parts[-1])
+
+        request_data = self.bot.db.get_request_by_id(request_id)
+
+        if not request_data:
+            await query.edit_message_text(
+                "❌ Заявка не найдена.",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("⬅️ Назад к списку", callback_data=f'req_page_{page}')]])
+            )
+            return self.VIEW_ALL_REQUESTS
+
+        text = self._format_application_info(dict(request_data))
+
+        keyboard_rows = [
+            [InlineKeyboardButton("⬅️ Назад к списку", callback_data=f'req_page_{page}')]
+        ]
+
+        if request_data['status'] not in self.TERMINAL_STATUSES:
+            keyboard_rows.insert(0, [InlineKeyboardButton(
+                "🔄 Восстановить админ-сообщение", callback_data=f'admin_restore_msg_{request_id}')])
+
+        reply_markup = InlineKeyboardMarkup(keyboard_rows)
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='HTML')
+        return self.VIEW_ALL_REQUESTS
+
+    # --- НОВЫЕ ФУНКЦИИ ДЛЯ АКТИВНЫХ ЗАЯВОК ---
+    async def _show_active_requests_list(self, update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 1):
+        """Displays a paginated list of active exchange requests."""
+        query = update.callback_query
+        if query:
+            await query.answer()
+
+        requests, total_pages = self.bot.db.get_active_requests(page=page, page_size=10)
+
+        text = "⏳ **Список активных заявок:**\n\n"
+        keyboard_buttons = []
+
+        if not requests:
+            text += "Активных заявок нет."
+        else:
+            for req in requests:
+                summary = f"ID: {req['id']} | @{req['username']} | {self.bot.exchange_handler.translate_status(req['status'])}"
+                keyboard_buttons.append([InlineKeyboardButton(
+                    summary, callback_data=f'view_active_req_{req["id"]}_{page}')])
+
+        pagination_row = []
+        if page > 1:
+            pagination_row.append(InlineKeyboardButton(
+                "⬅️", callback_data=f'active_req_page_{page - 1}'))
+        if total_pages > 1:
+            pagination_row.append(InlineKeyboardButton(
+                f"{page}/{total_pages}", callback_data='ignore_page'))
+        if page < total_pages:
+            pagination_row.append(InlineKeyboardButton(
+                "➡️", callback_data=f'active_req_page_{page + 1}'))
+
+        if pagination_row:
+            keyboard_buttons.append(pagination_row)
+
+        keyboard_buttons.append([InlineKeyboardButton(
+            "⬅️ Назад в меню", callback_data='admin_back_menu')])
+        reply_markup = InlineKeyboardMarkup(keyboard_buttons)
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        return self.VIEW_ACTIVE_REQUESTS
+
+    async def _handle_active_requests_page_navigation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handles page navigation for the list of active requests."""
+        query = update.callback_query
+        if 'ignore' in query.data:
+            await query.answer()
+            return self.VIEW_ACTIVE_REQUESTS
+
+        page = int(query.data.split('_')[-1])
+        return await self._show_active_requests_list(update, context, page=page)
+
+    async def _show_active_request_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Displays the full details of a selected request from the 'active' list."""
+        query = update.callback_query
+        await query.answer()
+
+        parts = query.data.split('_')
+        request_id = int(parts[-2])
+        page = int(parts[-1])
+
+        request_data = self.bot.db.get_request_by_id(request_id)
+
+        if not request_data:
+            await query.edit_message_text(
+                "❌ Заявка не найдена.",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("⬅️ Назад к списку", callback_data=f'active_req_page_{page}')]])
+            )
+            return self.VIEW_ACTIVE_REQUESTS
+
+        text = self._format_application_info(dict(request_data))
+
+        keyboard_rows = [
+            [InlineKeyboardButton("🔄 Восстановить админ-сообщение",
+                                  callback_data=f'admin_restore_msg_{request_id}')],
+            [InlineKeyboardButton("⬅️ Назад к списку", callback_data=f'active_req_page_{page}')]
+        ]
+
+        reply_markup = InlineKeyboardMarkup(keyboard_rows)
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='HTML')
+        return self.VIEW_ACTIVE_REQUESTS
+    # --- КОНЕЦ НОВЫХ ФУНКЦИЙ ---
+
+    async def _restore_admin_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handles the 'Restore Admin Message' button press from any view."""
+        query = update.callback_query
+
+        request_id = int(query.data.split('_')[-1])
+        admin_user = update.effective_user
+
+        logger.info(
+            f"[Aid] ({admin_user.id}) - Manually restoring admin message for request #{request_id}.")
+
+        try:
+            await self.bot.exchange_handler.regenerate_admin_message(request_id)
+            await query.answer("✅ Админ-сообщение для заявки восстановлено и отправлено.", show_alert=False)
+        except Exception as e:
+            logger.error(
+                f"Failed to restore admin message for request #{request_id}: {e}", exc_info=True)
+            await query.answer("❌ Произошла ошибка при восстановлении.", show_alert=True)
+
+        # Do not change state, let the user stay in the current view
+        return
 
     async def _show_referral_menu(self, query: Update.callback_query):  # type: ignore
         """Displays the referral balance management menu."""
@@ -729,7 +935,7 @@ class AdminPanelHandler:
             entry_points=[CommandHandler('a', self.start)],
             states={
                 self.ASK_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.check_password)],
-                self.ADMIN_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_|find_user_applications|restore_application|change_status|toggle_bot_status')],
+                self.ADMIN_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_|find_user_applications|restore_application|change_status|toggle_bot_status|view_all_requests|view_active_requests')],
                 self.SETTINGS_MENU: [CallbackQueryHandler(self.handle_callback, pattern='^admin_')],
                 self.SET_NEW_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_new_password)],
                 self.SET_EXCHANGE_RATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.set_exchange_rate)],
@@ -739,6 +945,27 @@ class AdminPanelHandler:
                 self.AWAIT_REQUEST_ID_FOR_RESTORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.restore_application)],
                 self.AWAIT_REQUEST_ID_FOR_STATUS_CHANGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.show_status_selection_menu)],
                 self.SELECT_NEW_STATUS: [CallbackQueryHandler(self.process_status_change, pattern='^set_status_|admin_back_menu$')],
+
+                self.VIEW_ALL_REQUESTS: [
+                    CallbackQueryHandler(self._show_request_details,
+                                         pattern=r'^view_req_details_'),
+                    CallbackQueryHandler(self._handle_requests_page_navigation,
+                                         pattern=r'^req_page_'),
+                    CallbackQueryHandler(self._restore_admin_message,
+                                         pattern=r'^admin_restore_msg_'),
+                    CallbackQueryHandler(self._show_main_menu, pattern='^admin_back_menu$')
+                ],
+                # --- НОВЫЙ БЛОК ДЛЯ АКТИВНЫХ ЗАЯВОК ---
+                self.VIEW_ACTIVE_REQUESTS: [
+                    CallbackQueryHandler(self._show_active_request_details,
+                                         pattern=r'^view_active_req_'),
+                    CallbackQueryHandler(
+                        self._handle_active_requests_page_navigation, pattern=r'^active_req_page_'),
+                    CallbackQueryHandler(self._restore_admin_message,
+                                         pattern=r'^admin_restore_msg_'),
+                    CallbackQueryHandler(self._show_main_menu, pattern='^admin_back_menu$')
+                ],
+                # --- КОНЕЦ ---
 
                 self.REFERRAL_MENU: [
                     CallbackQueryHandler(self._ask_for_user_to_modify,

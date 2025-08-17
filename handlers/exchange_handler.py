@@ -549,6 +549,25 @@ class ExchangeHandler:
         if new_user_message_id:
             self.bot.db.update_request_data(request_id, {'user_message_id': new_user_message_id})
 
+    # --- НОВЫЙ МЕТОД ---
+    async def regenerate_admin_message(self, request_id: int):
+        """
+        Regenerates and sends a fresh admin notification message for a given request,
+        reflecting its current state.
+        """
+        logger.info(f"[System] - Regenerating admin message for request #{request_id}.")
+        request_data = self.bot.db.get_request_by_id(request_id)
+        if not request_data:
+            logger.warning(
+                f"[System] - Could not regenerate admin message: Request #{request_id} not found.")
+            return
+
+        text, keyboard = self._generate_admin_message_content(request_data)
+        await self._update_admin_messages(request_id, text, keyboard)
+        logger.info(
+            f"[System] - Successfully regenerated admin message for request #{request_id}.")
+    # --- КОНЕЦ НОВОГО МЕТОДА ---
+
     async def confirming_exchange_trx(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
