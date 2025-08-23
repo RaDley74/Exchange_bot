@@ -1276,8 +1276,8 @@ class ExchangeHandler:
 
         if channel_id:
             channel_message = (
-                f"Пользователь: @{username}\n"
-                f"Отзыв: {review_text}"
+                f"⭐ Пользователь: @{username}\n\n"
+                f"💬 Отзыв: {review_text}"
             )
 
             try:
